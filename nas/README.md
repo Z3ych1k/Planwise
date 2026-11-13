@@ -2,6 +2,8 @@
 
 **[完整 fnOS 安裝與管理員密碼教程](INSTALL.md)** · **[保留資料更新](UPGRADE.md)** · **[單檔 Compose](../compose.yaml)**
 
+`feature/nas-cloudflare` 額外提供 [獨立 HTTPS／Tunnel 試作](CLOUDFLARE.md)，需批准域名和公網權限後才部署。原 LAN Compose 及 NAS 0.3.0 APK 保留。[此分支多帳號整合測試](CLOUDFLARE_TESTING.md)。
+
 Python／Flask JSON API + 獨立 HTML/CSS/JavaScript，fnOS x86-64 Docker 部署。局域網 HTTP，外出經 ZeroTier；預設 NAS 埠 9473。
 
 - 每帳號獨立一張表，同帳號跨網頁及 NAS APK 共用。沒有共享表。

@@ -1,9 +1,9 @@
 name: NAS preview checks
 on:
   push:
-    branches: [feature/nas-server]
+    branches: [feature/nas-server, feature/nas-cloudflare]
   pull_request:
-    paths: ['nas/**', '.dockerignore', '.github/workflows/nas-check.yml']
+    paths: ['nas/**', 'compose*.yaml', '.env.cloudflare.example', '.dockerignore', '.github/workflows/nas-check.yml']
 permissions:
   contents: read
 jobs:
@@ -21,6 +21,9 @@ jobs:
       - run: node --check android/runtime/app.js
       - run: docker compose config --quiet
       - run: docker compose -f nas/compose.yaml config --quiet
+      - run: docker compose -f compose.cloudflare.yaml config --quiet
+        env:
+          PLANWISE_PUBLIC_ORIGIN: https://planner.example.com
       - run: docker build --platform linux/amd64 -f nas/Dockerfile -t planwise-nas:test .
       - name: Test persistent container storage and production HTTP server
         run: |
@@ -44,5 +47,9 @@ jobs:
           git archive FETCH_HEAD | tar -x -C /tmp/planwise-previous
           docker build --platform linux/amd64 -f /tmp/planwise-previous/nas/Dockerfile -t planwise-nas:previous /tmp/planwise-previous
           python nas/check_upgrade.py
+      - name: Verify trusted and untrusted Docker peers
+        run: python nas/check_proxy_container.py
+      - name: Verify pinned cloudflared image without connecting a tunnel
+        run: docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true cloudflare/cloudflared:2026.11.0 --version
       - if: failure()
         run: docker logs nas-test || true

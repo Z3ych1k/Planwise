@@ -11,6 +11,7 @@
 
 ## NAS 入口
 
+- 此分支另提供 **[Cloudflare HTTPS 試作與批准步驟](nas/CLOUDFLARE.md)**、[獨立 Compose](compose.cloudflare.yaml) 和 [多帳號實測紀錄](nas/CLOUDFLARE_TESTING.md)。尚未啟用公網入口，原內網部署檔保留原樣。
 - **[直接查看／複製 Compose](compose.yaml)**：只取這一個檔案即可在 fnOS 建置；預設網址 `http://NAS的IP:9473/`。
 - **[安裝教程](nas/INSTALL.md)**：fnOS 圖形介面、終端部署、管理員帳號與密碼、重設密碼、升級與備份。
 - **[版本下載](https://github.com/Z3ych1k/Planwise/releases/tag/nas-v0.3.0-preview)**：部署包、NAS APK、Compose 及教程；本地 Android 仍用 0.5.2。
