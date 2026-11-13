@@ -4,9 +4,9 @@
 
 ## 本機已完成
 
-`python -m unittest discover -v`：**116 項通過**，包含原有 104 項，加上 6 項代理邊界及 6 項真實運行服務的整合測試。`node --test nas/test_client.cjs`：原有 **10 項通過**。
+`python -m unittest discover -v`：**117 項**，包含原有 104 項，加上 7 項代理邊界及 6 項真實運行服務的整合測試。`node --test nas/test_client.cjs`：原有 **10 項**。結果見對應提交的 Actions。
 
-整合測試路徑為 HTTPS client（驗證臨時 CA）→ 僅迴環地址的 TLS relay → 真實 Gunicorn → 臨時 SQLite；不是 Flask test client。relay 模擬 Cloudflare 覆寫協定／IP 的合約，沒有代替 Cloudflare 實網測試。
+整合測試路徑為 HTTPS client（驗證臨時 CA）→ 僅迴環地址的 TLS relay → 真實 Gunicorn（2 workers × 2 threads）→ 臨時 SQLite；不是 Flask test client。relay 模擬 Cloudflare 覆寫協定／IP 的合約，沒有代替 Cloudflare 實網測試。
 
 | 情境 | 已觀察結果 |
 | --- | --- |
@@ -25,6 +25,8 @@
 | 不同訪客經同一 connector | 註冊限流按訪客 IP 分開，改 XFF 不能繞過 |
 
 代理單元測試另驗證：不可信 peer 即使帶完整偽造 Cloudflare 標頭仍被拒；未啟用時不信任標頭；半套設定拒絕啟動且不建立 DB；健康檢查例外僅限本機 GET。
+
+首次 Docker CI 發現兩個 worker 同時初始化新 SQLite 檔案可能鎖住。生產命令新增 `--preload`，在 master 初始化並關閉連線後才 fork；每次請求仍自行開關連線，不變更 SQL 或資料庫格式。Docker 檢查會用全新專用卷驗證啟動，不以既有 DB 掩蓋問題。
 
 ## Docker CI
 

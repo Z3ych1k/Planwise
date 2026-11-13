@@ -96,7 +96,7 @@ class LiveProxyTests(unittest.TestCase):
         cls.addClassCleanup(log.close)
         environment=os.environ.copy()
         environment.update(PLANWISE_DATABASE=str(cls.database),PLANWISE_PUBLIC_ORIGIN=cls.origin,PLANWISE_TRUSTED_PROXY_IPS='127.0.0.1',PLANWISE_COOKIE_SECURE='1')
-        cls.process=subprocess.Popen([sys.executable,'-m','gunicorn','--bind','127.0.0.1:'+str(cls.backend_port),'--forwarded-allow-ips=','--workers','1','--threads','4','nas.application:create_app()'],cwd=ROOT,env=environment,stdout=log,stderr=log)
+        cls.process=subprocess.Popen([sys.executable,'-m','gunicorn','--preload','--bind','127.0.0.1:'+str(cls.backend_port),'--forwarded-allow-ips=','--workers','2','--threads','2','nas.application:create_app()'],cwd=ROOT,env=environment,stdout=log,stderr=log)
         cls.addClassCleanup(cls.stop_process)
         for _ in range(60):
             try:

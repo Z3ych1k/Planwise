@@ -52,6 +52,12 @@ class ProxyTests(unittest.TestCase):
         result=client.get('/api/state',headers=self.headers,environ_overrides={'REMOTE_ADDR':'192.0.2.5'})
         self.assertEqual(result.text,'http|planner.example.com|192.0.2.5')
 
+    def test_explicit_default_https_port_is_canonicalized(self):
+        client=Client(tunnel_proxy(self.echo,'https://planner.example.com:443/','172.30.77.3',True),Response)
+        for host in ('planner.example.com','planner.example.com:443'):
+            result=client.get('/api/state',headers=dict(self.headers,Host=host),environ_overrides={'REMOTE_ADDR':'172.30.77.3'})
+            self.assertEqual(result.text,'https|planner.example.com|2001:db8::7')
+
     def test_partial_or_unsafe_config_fails_closed_before_database_creation(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'not-created.sqlite3'

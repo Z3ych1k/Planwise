@@ -22,6 +22,8 @@ def tunnel_proxy(application, origin, trusted_ips, secure_cookie):
     except (ValueError, TypeError, AttributeError):
         raise ValueError('Tunnel mode requires PUBLIC_ORIGIN=https://host, exact TRUSTED_PROXY_IPS and COOKIE_SECURE=1.') from None
     host = public.netloc.lower()
+    if public.port == 443:
+        host = host.rsplit(':',1)[0]
 
     def denied(environ, start_response, status, message):
         return Response(json.dumps(dict(error=message,code='proxy')),status=status,
@@ -39,7 +41,10 @@ def tunnel_proxy(application, origin, trusted_ips, secure_cookie):
             return application(environ,start_response)
         if peer not in peers:
             return denied(environ,start_response,403,'Untrusted origin connection.')
-        if environ.get('HTTP_HOST','').lower() != host:
+        incoming_host = environ.get('HTTP_HOST','').lower()
+        if public.port in (None,443) and incoming_host.endswith(':443'):
+            incoming_host = incoming_host.rsplit(':',1)[0]
+        if incoming_host != host:
             return denied(environ,start_response,400,'Unexpected public hostname.')
         if environ.get('HTTP_X_FORWARDED_PROTO') != 'https':
             return denied(environ,start_response,403,'HTTPS is required at the tunnel edge.')

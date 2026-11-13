@@ -33,6 +33,7 @@
 - `PUBLIC_ORIGIN` 必須是單一 HTTPS origin，不含帳密、路徑、查詢參數；主機名必須吻合。只信任設定內的**確切 connector IP**，不接受 `*` 或整段子網路。
 - connector 必須提供 `X-Forwarded-Proto: https` 和單一合法 `CF-Connecting-IP`。後者作為限流訪客 IP；忽略 `X-Forwarded-For`／Host／Port 的偽造鏈。
 - Gunicorn 自動轉發標頭信任停用，由上述邊界統一處理。CSRF／Origin／Referer／帳號權限檢查保留；壞掉的 Origin 也明確拒絕，不產生 500。
+- Gunicorn 在 fork 前初始化 SQLite，避免兩個 worker 首次啟動時同時切換 WAL；資料庫連線仍按請求開關，格式不變。
 - cookie 在此模式為 Secure／HttpOnly／SameSite=Strict。帳號 API、備份、錯誤回應均禁止快取；Cloudflare 端另設 `/api/*` Cache Rule 為 Bypass，不加 Cache Everything 規則。
 - 只有容器本機的 `GET /healthz` 例外允許無代理標頭，供健康檢查；不提供帳號資料。
 
