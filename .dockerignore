@@ -7,6 +7,7 @@
 !planner.py
 !timetable.py
 !events.py
+!time_slots.py
 !storage.py
 !holidays.py
 !i18n.py

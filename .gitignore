@@ -24,6 +24,8 @@ __pycache__/
 *.sqlite3-*
 /nas/.env
 /.env
+/.env.cloudflare
+/.secrets/
 /.venv/
 /nas/android/.gradle/
 /nas/android/build/

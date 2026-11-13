@@ -17,6 +17,7 @@ from storage import export_state
 from timetable import initialize
 from nas.database import Database, digest, password_valid
 from nas.domain import apply, view
+from nas.proxy import tunnel_proxy
 
 HKT = timezone(timedelta(hours=8))
 COOKIE = 'planwise_session'
@@ -70,9 +71,12 @@ def create_app(config=None):
     app = Flask(__name__, static_folder='static', static_url_path='/static')
     app.config.update(DATABASE=os.environ.get('PLANWISE_DATABASE', '/data/planwise.sqlite3'),
                       COOKIE_SECURE=os.environ.get('PLANWISE_COOKIE_SECURE') == '1',
+                      PUBLIC_ORIGIN=os.environ.get('PLANWISE_PUBLIC_ORIGIN',''),
+                      TRUSTED_PROXY_IPS=os.environ.get('PLANWISE_TRUSTED_PROXY_IPS',''),
                       MAX_CONTENT_LENGTH=8_000_000, NOW=lambda: datetime.now(HKT))
     if config:
         app.config.update(config)
+    app.wsgi_app = tunnel_proxy(app.wsgi_app,app.config['PUBLIC_ORIGIN'],app.config['TRUSTED_PROXY_IPS'],app.config['COOKIE_SECURE'])
     store = Database(app.config['DATABASE'])
     app.extensions['store'] = store
     # Equal-cost password verification for unknown accounts.
@@ -125,7 +129,10 @@ def create_app(config=None):
             expected = urlsplit(request.host_url)
             for supplied in (origin, referer):
                 if supplied:
-                    parsed = urlsplit(supplied)
+                    try:
+                        parsed = urlsplit(supplied)
+                    except ValueError:
+                        raise APIError('Cross-origin request refused.', 403, 'origin') from None
                     if parsed.scheme != expected.scheme or parsed.netloc != expected.netloc:
                         raise APIError('Cross-origin request refused.', 403, 'origin')
             if request.headers.get('Sec-Fetch-Site') == 'cross-site' or request.headers.get('X-Planwise-Client') != '1':
@@ -133,7 +140,10 @@ def create_app(config=None):
 
     @app.after_request
     def headers(response):
-        response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
+        response.headers['Cache-Control'] = 'private, no-store' if request.path.startswith('/api/') else 'no-cache'
+        if request.path.startswith('/api/'):
+            response.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+            response.headers['CDN-Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'

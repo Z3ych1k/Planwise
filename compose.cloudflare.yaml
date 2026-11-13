@@ -1,0 +1,61 @@
+# Separate, opt-in HTTPS preview. Do not combine with the existing LAN Compose.
+name: planwise-cloudflare-preview
+services:
+  planwise:
+    build:
+      context: "https://github.com/Z3ych1k/Planwise.git#${PLANWISE_BUILD_REF:-feature/nas-cloudflare-oop}"
+      dockerfile: nas/Dockerfile
+    image: planwise-nas:cloudflare-preview
+    platform: linux/amd64
+    environment:
+      PLANWISE_DATABASE: /data/planwise.sqlite3
+      PLANWISE_PUBLIC_ORIGIN: "${PLANWISE_PUBLIC_ORIGIN:?Set the approved HTTPS origin in .env.cloudflare}"
+      PLANWISE_TRUSTED_PROXY_IPS: "${PLANWISE_CONNECTOR_IP:-172.30.77.3}"
+      PLANWISE_COOKIE_SECURE: "1"
+    networks:
+      origin:
+        ipv4_address: "${PLANWISE_ORIGIN_IP:-172.30.77.2}"
+    volumes:
+      - cloudflare-data:/data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 30s
+  cloudflared:
+    profiles: [public]
+    image: cloudflare/cloudflared:2026.11.0
+    platform: linux/amd64
+    user: "65532:65532"
+    command: [tunnel, --no-autoupdate, run]
+    environment:
+      TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
+    secrets:
+      - tunnel_token
+    networks:
+      origin:
+        ipv4_address: "${PLANWISE_CONNECTOR_IP:-172.30.77.3}"
+      edge:
+    depends_on:
+      planwise:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    restart: unless-stopped
+networks:
+  origin:
+    internal: true
+    ipam:
+      config:
+        - subnet: "${PLANWISE_TUNNEL_SUBNET:-172.30.77.0/29}"
+  edge:
+volumes:
+  cloudflare-data:
+secrets:
+  tunnel_token:
+    file: "${PLANWISE_TUNNEL_TOKEN_FILE:-./.secrets/cloudflare-tunnel-token}"
