@@ -1194,5 +1194,33 @@
   "有前移建議，可稍後查看 →": [
     "有前移建议，可稍后查看 →",
     "Move suggestion available — review when ready →"
+  ],
+  "表單欄位格式不正確。": [
+    "表单字段格式不正确。",
+    "Invalid form fields."
+  ],
+  "單值欄位必須提供一個值；日期選項才可提供多個值。": [
+    "单值字段必须提供一个值；日期选项才可提供多个值。",
+    "Provide exactly one value per field; only weekday selections accept multiple values."
+  ],
+  "表單欄位只能包含文字或有限數字。": [
+    "表单字段只能包含文字或有限数字。",
+    "Form fields must contain text or finite numbers."
+  ],
+  "日期無效，請輸入有效日期，例如 2026-11-14。": [
+    "日期无效，请输入有效日期，例如 2026-11-14。",
+    "Invalid date. Enter a valid date, for example 2026-11-14."
+  ],
+  "語言或工作日設定不正確。": [
+    "语言或工作日设置不正确。",
+    "Invalid language or workdays."
+  ],
+  "請求無法處理，請檢查內容後重試。": [
+    "请求无法处理，请检查内容后重试。",
+    "The request could not be processed. Check its contents and try again."
+  ],
+  "服務暫時無法處理請求，請重新整理並確認最新資料後再試。": [
+    "服务暂时无法处理请求，请刷新并确认最新数据后再试。",
+    "The service could not process the request. Refresh and check the latest data before trying again."
   ]
 }

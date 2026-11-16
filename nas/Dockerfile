@@ -6,7 +6,7 @@ RUN pip install --no-cache-dir -r nas/requirements.txt \
     && groupadd --gid 10001 planwise \
     && useradd --uid 10001 --gid 10001 --no-create-home planwise \
     && mkdir /data && chown 10001:10001 /data
-COPY planner.py timetable.py events.py time_slots.py storage.py holidays.py i18n.py translations.json /app/
+COPY planner.py timetable.py events.py time_slots.py validation.py storage.py holidays.py i18n.py translations.json /app/
 COPY nas/*.py /app/nas/
 COPY nas/static /app/nas/static
 USER 10001:10001

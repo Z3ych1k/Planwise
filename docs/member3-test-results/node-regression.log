@@ -1,0 +1,22 @@
+✔ cold offline launch paints cached plan immediately, before any network result (20.3828ms)
+✔ stalled connection is aborted at eight seconds and keeps cached data visible (2.9009ms)
+✔ refresh reconnects, loads latest version, then enables editing (1.6285ms)
+✔ mobile defaults to all seven columns and retains explicit day view (1.5213ms)
+✔ first use without cache shows sign-in immediately and a retry after timeout (1.7956ms)
+✔ invalid cache cannot turn a cold launch into an empty page (1.526ms)
+✔ sign-in offers invite-only registration with password confirmation (0.8247ms)
+✔ regular settings keep personal preferences and hide administrator management (1.763ms)
+✔ unauthenticated polling preserves the registration form instead of replacing typed fields (1.8672ms)
+✔ invitation usage refreshes even when the administrator plan version is unchanged (1.4189ms)
+✔ HTML server errors keep their HTTP status and show a readable error (1.2586ms)
+✔ invalid success JSON cannot be mistaken for a confirmed save (1.1121ms)
+✔ a failed save preserves plan and input and releases buttons for retry (1.5014ms)
+✔ an unreadable save response keeps old data and requires reconnection (1.7536ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.6919

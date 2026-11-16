@@ -244,5 +244,85 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.state()['state']['time_model'],'free')
 
 
+    def assert_invalid_unchanged(self, action, fields):
+        before = self.state()
+        response = self.action(action, fields)
+        self.assertEqual(response.status_code, 400, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['code'], 'invalid')
+        after = self.state()
+        self.assertEqual(after['state'], before['state'])
+        self.assertEqual(after['version'], before['version'])
+        return response.get_json()['error']
+
+    def test_scalar_empty_and_multiple_values_are_rejected_without_changes(self):
+        for action, fields in [('save', {'title': []}), ('save_settings', {'language': []}),
+                               ('save', {'title': ['one', 'two']}), ('import_data', {'backup_json': []}),
+                               ('save_event', {'title': []}), ('move_block', {'id': []})]:
+            with self.subTest(action=action, fields=fields):
+                self.assert_invalid_unchanged(action, fields)
+
+    def test_nested_boolean_null_and_nonfinite_fields_are_rejected(self):
+        for value in [None, True, {}, [None], float('nan'), float('inf')]:
+            with self.subTest(value=value):
+                self.assert_invalid_unchanged('save', {'title': value})
+
+    def test_empty_workdays_and_multiple_weekdays_remain_supported(self):
+        response = self.action('save_settings', {'language': 'en', 'workdays': []})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['state']['workdays'], [])
+        response = self.action('save_event', dict(title='Weekly', category='private', repeat='weekly',
+            date='2026-11-12', event_start='09:00', event_end='09:30', weekdays=[1, 3, 5]))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['state']['events'][-1]['weekdays'], [1, 3, 5])
+
+    def test_invalid_dates_have_friendly_localized_errors(self):
+        base = dict(title='Essay', course='', kind='deadline', due='2026-02-30', hours='1', important='yes')
+        for language in ['zh-Hant', 'zh-Hans', 'en']:
+            self.assertEqual(self.action('save_settings', {'language': language, 'workdays': []}).status_code, 200)
+            message = self.assert_invalid_unchanged('save', base)
+            self.assertNotIn('must be in range', message)
+            self.assertIn('2026-11-14', message)
+            self.assertIn({'zh-Hant': '日期無效', 'zh-Hans': '日期无效', 'en': 'Invalid date'}[language], message)
+        self.assert_invalid_unchanged('save', dict(base, due='2026-11-14', start='not-a-date'))
+        self.assert_invalid_unchanged('save_event', dict(title='Event', category='private', repeat='none',
+            date='2026-02-30', event_start='09:00', event_end='10:00'))
+
+    def test_bad_backup_shapes_use_backup_error_and_preserve_data(self):
+        self.task()
+        for text in ['{bad json', 'null', '[]', '{"tasks":null}',
+                     '{"format":"planwise-backup","backup_version":1}',
+                     '{"version":2,"tasks":[],"capacity":{},"events":[{}]}']:
+            with self.subTest(text=text):
+                message = self.assert_invalid_unchanged('import_data', {'replace_confirm': 'yes', 'backup_json': text})
+                self.assertIn('備份檔格式不正確', message)
+
+    def test_invalid_hours_names_and_workdays_leave_plan_unchanged(self):
+        base = dict(title='Essay', course='', kind='deadline', due='2026-11-14', hours='1', important='yes')
+        for value in ['abc', '-1', '0.25', 'NaN', 'Infinity', '1000.5']:
+            self.assert_invalid_unchanged('save', dict(base, hours=value))
+        for value in ['', '   ', 'x'*101]:
+            self.assert_invalid_unchanged('save', dict(base, title=value))
+        for value in [['oops'], [-1], [7]]:
+            self.assert_invalid_unchanged('save_settings', {'language': 'en', 'workdays': value})
+
+    def test_unexpected_action_failure_is_json_and_rolls_back(self):
+        before = self.state()
+        with patch('nas.application.apply', side_effect=RuntimeError('private internal detail')):
+            with self.assertLogs(self.app.logger, level='ERROR'):
+                response = self.action('save_policy', {})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()['code'], 'internal')
+        self.assertNotIn('private internal detail', response.get_data(as_text=True))
+        after = self.state()
+        self.assertEqual(after['state'], before['state'])
+        self.assertEqual(after['version'], before['version'])
+
+    def test_unknown_api_and_method_return_json_http_errors(self):
+        for response, status in [(self.client.get('/api/does-not-exist'), 404),
+                                 (self.client.get('/api/actions'), 405)]:
+            self.assertEqual(response.status_code, status)
+            self.assertEqual(response.get_json()['code'], 'http_error')
+
+
 if __name__=='__main__':
     unittest.main()

@@ -1,0 +1,84 @@
+{
+  "date": "2026-11-14",
+  "backup": "D:\\Courses\\INT6181\\Planwise-backup-20261114-093131",
+  "backup_sha256_verified": true,
+  "backed_up_files": 86,
+  "modified_original_files": [
+    ".dockerignore",
+    "android/build-apk.sh",
+    "android/runtime/main.py",
+    "events.py",
+    "nas/Dockerfile",
+    "nas/application.py",
+    "nas/domain.py",
+    "nas/static/ui.js",
+    "nas/test_api.py",
+    "nas/test_client.cjs",
+    "planner.py",
+    "storage.py",
+    "translations.json"
+  ],
+  "all_modified_original_files_backed_up": true,
+  "new_source_and_test_files": [
+    "validation.py",
+    "test_validation.py"
+  ],
+  "python_tests": {
+    "run": 127,
+    "failures": 0,
+    "errors": 0,
+    "excluded_module": "nas.test_proxy_live",
+    "excluded_cases": 6
+  },
+  "node_tests": {
+    "run": 14,
+    "passed": 14
+  },
+  "checks": {
+    "nas_js_syntax": {
+      "command": [
+        "node",
+        "--check",
+        "nas/static/ui.js"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    "android_js_syntax": {
+      "command": [
+        "node",
+        "--check",
+        "android/runtime/app.js"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    "python_compile": {
+      "command": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "validation.py",
+        "planner.py",
+        "events.py",
+        "storage.py",
+        "nas",
+        "android/runtime"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    "diff_check": {
+      "command": [
+        "git",
+        "-c",
+        "core.safecrlf=false",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": ""
+    }
+  }
+}
