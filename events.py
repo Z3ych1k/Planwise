@@ -269,4 +269,17 @@ def validate_events(items):
 
         def check_time(row):
             if any(type(row[k]) is not int or row[k] % 30 for k in ('start', 'end')) or not 0 <= row['start'] < 1440 or not row['start'] < row['end'] <= row['start'] + 1440:
-                raise ValueError('事項時段不正確
+                raise ValueError('事項時段不正確。')
+
+        check_time(e)
+        if not isinstance(e['overrides'], dict):
+            raise ValueError('單次事項修改資料不正確。')
+        for key, row in e['overrides'].items():
+            date.fromisoformat(key)
+            if not isinstance(row, dict):
+                raise ValueError('單次事項修改格式不正確。')
+            if row.get('cancelled') is True:
+                continue
+            date.fromisoformat(row['date'])
+            check_time(row)
+    return items
