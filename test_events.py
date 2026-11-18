@@ -225,7 +225,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s['availability'][D0] = []
         # Fixed event from D0 22:00 (1320) to D1 06:00 (1800)
         s['events'] = [event('night_fixed', day=D0, start=1320, end=1800, category='fixed', repeat='none')]
-        plan, _ = candidate(s, TODAY)
+        plan, _ = candidate(s, D0)
         # Task can only start at or after 06:00 (360 min) on D1
         d1_starts = [b['start'] for b in plan if b['date'] == D1]
         self.assertEqual(d1_starts, [360])
