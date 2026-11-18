@@ -143,4 +143,37 @@ class Localizer(HTMLParser):
         Args:
             decl (str): Declaration content inside ``<!...>``.
         """
-        self.output.append('<!' + decl
+        self.output.append('<!' + decl + '>')
+
+
+def localize_html(html, language):
+    """Translate a complete HTML document string into the specified target language.
+
+    Args:
+        html (str): Rendered HTML page content in Traditional Chinese (``zh-Hant``).
+        language (str): Target locale code (``'zh-Hant'``, ``'zh-Hans'``, or ``'en'``).
+
+    Returns:
+        str: Localized HTML output with static UI text and labels translated while
+        leaving user-provided content intact.
+    """
+    if language == 'zh-Hant':
+        return html
+    parser = Localizer(language)
+    parser.feed(html)
+    return ''.join(parser.output)
+
+
+def client_messages(language):
+    """Build a dictionary mapping all catalog keys to their translated strings.
+
+    Used to expose localized UI strings to client-side JavaScript scripts.
+
+    Args:
+        language (str): Target locale code (``'zh-Hant'``, ``'zh-Hans'``, or ``'en'``).
+
+    Returns:
+        dict[str, str]: Mapping from source Traditional Chinese phrase keys to
+        localized strings in ``language``.
+    """
+    return {key: translate(key, language) for key in CATALOG}
