@@ -1,0 +1,45 @@
+name: Planwise Core CI
+
+on:
+  push:
+    branches: [main, master, 'feature/**']
+  pull_request:
+    branches: [main, master, 'feature/**']
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    name: Core Unit & Boundary Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install optional dependencies if present
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f nas/requirements.txt ]; then pip install -r nas/requirements.txt; fi
+
+      - name: Verify Python syntax and JSON validity
+        run: |
+          python -m py_compile *.py
+          python -c "import json; json.load(open('translations.json', encoding='utf-8'))"
+
+      - name: Run full unittest suite (including boundary & edge cases)
+        run: python -m unittest discover -v
+
+      - name: Check frontend JavaScript syntax
+        run: |
+          if [ -f android/runtime/app.js ]; then node --check android/runtime/app.js; fi

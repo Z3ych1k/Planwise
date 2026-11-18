@@ -1,10 +1,30 @@
-"""Scheduling rules, independent of the browser and file system."""
+"""Scheduling rules, independent of the browser and file system.
+
+This module implements the core task scheduling algorithms, Eisenhower-style
+urgency/importance ranking, daily capacity validation, greedy earliest-deadline-first
+allocation across a 7-day horizon, and task/work-log state mutations.
+"""
 from datetime import date, timedelta
 import math
 import secrets
 
 
 def minutes(value):
+    """Convert an hour string or numeric value into an integer number of minutes.
+
+    Validates that the input is a finite number between 0 and 1000 inclusive,
+    aligned to half-hour (0.5-hour) increments.
+
+    Args:
+        value (str | int | float): Hour quantity to parse and validate.
+
+    Returns:
+        int: The equivalent duration in minutes (e.g., ``1.5`` -> ``90``).
+
+    Raises:
+        ValueError: If ``value`` cannot be parsed as a number, is non-finite,
+            falls outside ``[0, 1000]``, or is not a multiple of 0.5 hours.
+    """
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -15,15 +35,56 @@ def minutes(value):
 
 
 def rank(task, today):
+    """Compute the Eisenhower-matrix priority quadrant index (0 to 3) for a task.
+
+    A task is considered urgent if its kind is ``'deadline'`` and its due date
+    is within 3 days of ``today``.
+
+    Args:
+        task (dict): Task dictionary containing ``kind``, ``due``, and ``important``.
+        today (datetime.date): The reference current date.
+
+    Returns:
+        int: Priority rank where ``0`` is urgent & important, ``1`` is non-urgent
+        & important, ``2`` is urgent & unimportant, and ``3`` is neither.
+    """
     urgent = task['kind'] == 'deadline' and (date.fromisoformat(task['due']) - today).days <= 3
     return (0 if urgent else 1) if task['important'] else (2 if urgent else 3)
 
 
 def spent_on(state, day):
+    """Calculate total logged work minutes on a specific ISO date.
+
+    Args:
+        state (dict): Application state containing the ``work_log`` list.
+        day (str): Target date formatted as an ISO-8601 string (``YYYY-MM-DD``).
+
+    Returns:
+        int: Sum of ``minutes`` across all work-log entries recorded on ``day``.
+    """
     return sum(row['minutes'] for row in state['work_log'] if row['date'] == day)
 
 
 def schedule(state, today):
+    """Allocate active deadline tasks across a 7-day window using greedy EDF.
+
+    Sorts incomplete deadline tasks by due date, importance, and ID, then fills
+    available daily capacity between each task's earliest start date and due date.
+    Unallocated minutes are classified by failure reason.
+
+    Args:
+        state (dict): Application state containing ``capacity``, ``work_log``,
+            and ``tasks``.
+        today (datetime.date): Start date of the 7-day scheduling horizon.
+
+    Returns:
+        tuple[dict[str, list[tuple[dict, int]]], dict[str, int], list[tuple[dict, int, str]]]:
+        A 3-tuple ``(plan, free, missing)`` where:
+            - ``plan`` maps each ISO date to a list of ``(task, allocated_minutes)`` pairs.
+            - ``free`` maps each ISO date to remaining unallocated minutes.
+            - ``missing`` lists ``(task, unscheduled_minutes, reason)`` tuples where
+              ``reason`` is ``'overdue'``, ``'outside_week'``, or ``'deadline_capacity'``.
+    """
     days = [(today + timedelta(days=i)).isoformat() for i in range(7)]
     free = {day: max(0, state['capacity'].get(day, 0) - spent_on(state, day)) for day in days}
     plan = {day: [] for day in days}
@@ -46,12 +107,46 @@ def schedule(state, today):
 
 
 def suggestions(state, day, free):
+    """Recommend incomplete long-term goal tasks when a day has spare capacity.
+
+    Args:
+        state (dict): Application state containing the ``tasks`` list.
+        day (str): Target ISO date string (``YYYY-MM-DD``) being evaluated.
+        free (int): Remaining unallocated capacity in minutes on ``day``.
+
+    Returns:
+        list[dict]: Incomplete ``'goal'`` tasks eligible on or before ``day``,
+        sorted by importance first and title alphabetically; empty list if
+        ``free < 30``.
+    """
     if free < 30:
         return []
     return sorted((t for t in state['tasks'] if t['kind'] == 'goal' and not t['completed'] and (not t['start'] or t['start'] <= day)), key=lambda t: (not t['important'], t['title']))
 
 
 def mutate(state, data, today):
+    """Apply a user state mutation for capacity updates, task CRUD, or work logging.
+
+    Dispatches based on ``data['action']`` (``'capacity'``, ``'save'``, ``'progress'``,
+    or ``'delete'``) and enforces all domain validation rules.
+
+    Args:
+        state (dict): Mutable application state containing ``capacity``, ``tasks``,
+            and ``work_log``.
+        data (dict[str, list[str]]): Parsed form submission mapping field names to
+            lists of string values.
+        today (datetime.date): Reference date used for the 7-day capacity window
+            and work-log timestamps.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the action is unknown, daily capacity or cumulative logged
+            hours exceed 24 hours (1440 minutes), required task fields are missing
+            or exceed length limits, date ordering is invalid, or a referenced task
+            cannot be found or is already completed.
+    """
     def field(key):
         return data.get(key, [''])[0].strip()
 
@@ -89,8 +184,9 @@ def mutate(state, data, today):
             raise ValueError('找不到這份任務。')
         if task and task['completed']:
             raise ValueError('這份任務已完成。')
-        target = minutes(field('target_hours') or '10') if kind=='goal' else 600
-        if target<30:raise ValueError('圓點參考工時至少半小時。')
+        target = minutes(field('target_hours') or '10') if kind == 'goal' else 600
+        if target < 30:
+            raise ValueError('圓點參考工時至少半小時。')
         values = dict(target_minutes=target, title=title, course=course, kind=kind, start=start, due=due, minutes=amount, important=field('important') == 'yes')
         if task is None:
             state['tasks'].append(dict(id=secrets.token_hex(8), completed=False, completed_on='', **values))
@@ -118,7 +214,19 @@ def mutate(state, data, today):
         raise ValueError('未知操作。')
 
 
-def goal_progress(state,task):
-    invested=sum(row['minutes'] for row in state['work_log'] if row['task_id']==task['id'])
-    target=task.get('target_minutes',600)
-    return invested,target,min(1,invested/target)
+def goal_progress(state, task):
+    """Compute cumulative invested minutes and completion ratio for a goal task.
+
+    Args:
+        state (dict): Application state containing the ``work_log`` list.
+        task (dict): Goal task dictionary containing ``id`` and optional
+            ``target_minutes`` (defaults to ``600``).
+
+    Returns:
+        tuple[int, int, float]: A 3-tuple ``(invested, target, ratio)`` where
+        ``invested`` is total logged minutes for the task, ``target`` is the
+        reference target minutes, and ``ratio`` is clamped to ``[0.0, 1.0]``.
+    """
+    invested = sum(row['minutes'] for row in state['work_log'] if row['task_id'] == task['id'])
+    target = task.get('target_minutes', 600)
+    return invested, target, min(1, invested / target)
