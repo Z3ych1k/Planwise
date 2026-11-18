@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-
+from i18n import client_messages, localize_html, translate
 from android.runtime.main import event_bubble, render
 from events import cancel_occurrence, move_occurrence, occurrences, save_event
 from storage import empty_state, load_state, save_state
@@ -205,11 +205,12 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         holiday_dates = [b['date'] for b in rows if b['event_id'] == 'h']
         # 2026-01-01 (Thu) is New Year's Day; 2026-01-02 (Fri) is workday; Jan 3 (Sat) & Jan 4 (Sun) are non-workdays
         self.assertEqual(workday_dates, ['2026-01-02'])
-        self.assertEqual(holiday_dates, ['2026-01-01', '2026-01-04'])
+        self.assertEqual(holiday_dates, ['2026-01-01', '2026-01-03', '2026-01-04'])
 
     def test_cancel_overnight_occurrence_removes_both_halves_and_prevents_double_cancel(self):
         """Edge case: cancelling an overnight occurrence removes both day segments and blocks duplicate cancel."""
         s = free_state()
+        s['availability'][D0] = []
         s['events'] = [event('night', day=D0, start=1380, end=1500, category='private', repeat='daily')]
         cancel_occurrence(s, form(id='night', occurrence_date=D0))
         rows = occurrences(s, TODAY, TODAY + timedelta(days=1))
