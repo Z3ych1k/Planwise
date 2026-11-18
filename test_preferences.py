@@ -15,7 +15,7 @@ from unittest.mock import patch
 from android.runtime.main import render, task_bubble
 from events import occurrences, save_event
 from holidays import HOLIDAYS, holiday_name, is_workday
-from i18n import localize_html, translate
+from i18n import client_messages, localize_html, translate
 from planner import goal_progress, mutate
 from storage import empty_state, export_state, import_state, load_state, save_state
 from test_events import event, free_state

@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from i18n import client_messages, localize_html, translate
+
 from android.runtime.main import event_bubble, render
 from events import cancel_occurrence, move_occurrence, occurrences, save_event
 from storage import empty_state, load_state, save_state
@@ -222,6 +222,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
     def test_overnight_fixed_event_blocks_next_morning_task_scheduling(self):
         """Cross-module edge case: an overnight fixed event on D0 blocks early-morning task slots on D1."""
         s = free_state([task('morning', delta=1, amount=60)])
+        s['availability'][D0] = []
         # Fixed event from D0 22:00 (1320) to D1 06:00 (1800)
         s['events'] = [event('night_fixed', day=D0, start=1320, end=1800, category='fixed', repeat='none')]
         plan, _ = candidate(s, TODAY)
