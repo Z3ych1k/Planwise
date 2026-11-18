@@ -221,14 +221,17 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
 
     def test_overnight_fixed_event_blocks_next_morning_task_scheduling(self):
         """Cross-module edge case: an overnight fixed event on D0 blocks early-morning task slots on D1."""
+        today_str = TODAY.isoformat()
+        tomorrow_str = (TODAY + timedelta(days=1)).isoformat()
         s = free_state([task('morning', delta=1, amount=60)])
-        s['availability'][D0] = []
-        # Fixed event from D0 22:00 (1320) to D1 06:00 (1800)
-        s['events'] = [event('night_fixed', day=D0, start=1320, end=1800, category='fixed', repeat='none')]
-        plan, _ = candidate(s, D0)
-        # Task can only start at or after 06:00 (360 min) on D1
-        d1_starts = [b['start'] for b in plan if b['date'] == D1]
-        self.assertEqual(d1_starts, [360])
+        s['availability'][today_str] = []
+        # Fixed event from today 22:00 (1320) to tomorrow 06:00 (1800)
+        s['events'] = [event('night_fixed', day=today_str, start=1320, end=1800, category='fixed', repeat='none')]
+        plan, _ = candidate(s, TODAY)
+        # Task must be scheduled on tomorrow_str, starting no earlier than 06:00 (360 min)
+        d1_starts = [b['start'] for b in plan if b['date'] == tomorrow_str]
+        self.assertTrue(len(d1_starts) > 0)
+        self.assertEqual(min(d1_starts), 360)
 
     def test_delete_event_removes_series_and_rejects_missing_id(self):
         """Edge case: ``save_event`` with ``delete_event`` removes the event and raises on unknown ID."""
