@@ -8,6 +8,7 @@
 !timetable.py
 !events.py
 !time_slots.py
+!validation.py
 !storage.py
 !holidays.py
 !i18n.py

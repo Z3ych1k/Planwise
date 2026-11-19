@@ -65,6 +65,8 @@ Object.assign(TEXT,{
   registrationUncertain:['連線中斷，帳號是否建立尚未確認；重新連線後可先嘗試登入。','连接中断，账号是否创建尚未确认；重新连接后可先尝试登录。']
 });
 Object.assign(EN,{register:'Create account',registerLink:'Create an account with an invitation',backToLogin:'Already have an account? Sign in',loginNote:'Sign in to use the same plan on all devices, or create an account with an invitation.',registerNote:'Use an invitation from your administrator to create your own account and private plan. This creates a regular account only.',inviteCode:'Invitation code',confirmPassword:'Repeat password',invites:'Invitation management',inviteNote:'Each code can be used once within 7 days. The full code is shown only when created; copy it for the new user. Other settings belong to each user’s own plan.',generateInvite:'Generate invitation',inviteGenerated:'Invitation created. Copy and keep the code.',inviteOnce:'Copy this invitation code. Signing out clears it from this page.',inviteEmpty:'No invitations yet.',invitePending:'Unused',used:'Used',expired:'Expired',revoked:'Revoked',revoke:'Revoke',expires:'Expires',inviteRevoked:'Invitation revoked.',registered:'Account created and signed in.',invalidInvite:'Invalid, used or expired invitation. Ask your administrator for a new code.',usernameRule:'Use 3–40 letters, digits, dots, underscores or hyphens for the username.',passwordRule:'Use 12–200 characters for the password.',passwordMismatch:'The two passwords do not match.',usernameTaken:'This username is already in use.',alreadySignedIn:'Sign out before creating another account.',tooManyAttempts:'Too many attempts. Try again in 15 minutes.',registrationUncertain:'Connection lost. Account creation is unconfirmed. Reconnect and try signing in first.'});
+Object.assign(TEXT,{invalidResponse:['伺服器回應格式不正確，請稍後重新整理並確認最新資料。','服务器响应格式不正确，请稍后刷新并确认最新数据。']});
+Object.assign(EN,{invalidResponse:'The server returned an invalid response. Refresh later and check the latest data.'});
 let language='zh-Hant';
 try{language=localStorage.getItem('planwise-language')||language;}catch{}
 const embedded=document.getElementById('offline-data');
@@ -94,7 +96,17 @@ async function api(path,data){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
   try{
     const response=await fetch(path,{method:data?'POST':'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{'Content-Type':'application/json','X-Planwise-Client':'1',...(snap?.csrf?{'X-CSRF-Token':snap.csrf}:{})},...(data?{body:JSON.stringify(data)}:{})});
-    const result=await response.json();
+    let result;
+    try{result=await response.json();}catch{
+      const error=new Error(t('invalidResponse'));error.code='invalid_response';
+      if(!response.ok)error.status=response.status;
+      throw error;
+    }
+    if(!result||typeof result!=='object'||Array.isArray(result)){
+      const error=new Error(t('invalidResponse'));error.code='invalid_response';
+      if(!response.ok)error.status=response.status;
+      throw error;
+    }
     if(!response.ok){const error=new Error(result.error||response.statusText);error.status=response.status;error.code=result.code;throw error;}
     return result;
   }finally{clearTimeout(timer);}
@@ -135,8 +147,8 @@ function connection(){return `<span class="status ${offline?'off':''}">${esc(t(o
 async function change(action,fields={},version=snap?.version){
   if(offline||busy){notify(t('readOnly'));return false;}
   busy=true;lockWrites();
-  const requestId=globalThis.crypto?.randomUUID?.()||Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
   try{
+    const requestId=globalThis.crypto?.randomUUID?.()||Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
     const data=await api('/api/actions',{action,fields,version,request_id:requestId});
     const scroll=$('.calendar-wrap')?.scrollTop;adopt(data);closeBubble();render();if(scroll!==undefined&&$('.calendar-wrap'))$('.calendar-wrap').scrollTop=scroll;notify(t('saved'));return true;
   }catch(error){

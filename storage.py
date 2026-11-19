@@ -139,7 +139,7 @@ def load_state(path, today):
     try:
         raw = json.loads(path.read_text(encoding='utf-8'))
         state = migrate(raw)
-    except (ValueError, KeyError, TypeError, OSError) as exc:
+    except (ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError, OSError) as exc:
         raise ValueError('無法讀取資料，原檔已保留。請先備份並修復資料檔，或將其改名後重新啟動。') from exc
     message = '舊資料已讀入；舊有 15 分鐘工時向上取整、可用時間向下取整至半小時。首次儲存會保留舊版備份。' if raw.get('version', 1) == 1 else ''
     return state, message

@@ -7,7 +7,7 @@ export JAVA_HOME="${JAVA_HOME:-$toolchain_dir/jdk/Contents/Home}"
 export ANDROID_HOME="${ANDROID_HOME:-$toolchain_dir/sdk}"
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$toolchain_dir/gradle}"
 export PATH="$JAVA_HOME/bin:$PATH"
-for name in planner.py storage.py timetable.py events.py time_slots.py holidays.py i18n.py translations.json; do
+for name in planner.py storage.py timetable.py events.py time_slots.py validation.py holidays.py i18n.py translations.json; do
     cp "$planner_dir/$name" "$android_dir/app/src/main/python/$name"
 done
 for name in main.py style.css app.js; do
