@@ -7,6 +7,7 @@ allocation across a 7-day horizon, and task/work-log state mutations.
 from datetime import date, timedelta
 import math
 import secrets
+from validation import parse_date
 
 
 def minutes(value):
@@ -170,11 +171,11 @@ def mutate(state, data, today):
             raise ValueError('請選擇任務類型及重要程度。')
         start, due = field('start'), field('due') if kind == 'deadline' else ''
         if start:
-            start = date.fromisoformat(start).isoformat()
+            start = parse_date(start).isoformat()
         if kind == 'deadline':
             if not due:
                 raise ValueError('有 DDL 的任務需要截止日期。長期目標可不填期限。')
-            due = date.fromisoformat(due).isoformat()
+            due = parse_date(due).isoformat()
             if start and start > due:
                 raise ValueError('最早開始日不能晚於截止日期。')
         amount = minutes(field('hours')) if kind == 'deadline' else 0

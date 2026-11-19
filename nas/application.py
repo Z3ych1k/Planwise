@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.exceptions import HTTPException
 from i18n import translate
 from storage import export_state
 from timetable import initialize
@@ -163,6 +164,15 @@ def create_app(config=None):
     def database_error(exc):
         app.logger.error('Database operation failed: %s', type(exc).__name__)
         return jsonify(error='Storage unavailable; changes were not saved.', code='storage'), 503
+
+    @app.errorhandler(Exception)
+    def unexpected_error(exc):
+        if isinstance(exc, HTTPException):
+            if request.path.startswith('/api/'):
+                return jsonify(error=translate('請求無法處理，請檢查內容後重試。', getattr(g, 'language', 'zh-Hant')), code='http_error'), exc.code
+            return exc
+        app.logger.exception('Unhandled request error')
+        return jsonify(error=translate('服務暫時無法處理請求，請重新整理並確認最新資料後再試。', getattr(g, 'language', 'zh-Hant')), code='internal'), 500
 
     @app.get('/')
     def index():

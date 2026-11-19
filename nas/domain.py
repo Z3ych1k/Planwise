@@ -1,42 +1,37 @@
 """Translate the JSON API into the existing scheduling rules."""
 from datetime import timedelta
-import json
 
 from events import cancel_occurrence, move_occurrence, occurrences, save_event
 from holidays import holiday_name, YEARS
 from planner import goal_progress, mutate, rank
 from storage import import_state
+from validation import normalize_fields
 from timetable import (available_cells, cells, decide, initialize, preview_parts,
                        record_clock, refresh, move_block, update_windows)
 
 
 def apply(state, action, fields, today, cutoff):
-    if not isinstance(fields, dict) or len(fields) > 100:
-        raise ValueError('Invalid fields.')
-    data = {}
-    for key, value in fields.items():
-        values = value if isinstance(value, list) else [value]
-        if not isinstance(key, str) or len(values) > 20 or any(not isinstance(v, (str, int, float)) or isinstance(v, bool) for v in values):
-            raise ValueError('Invalid field value.')
-        data[key] = [str(v) for v in values]
+    data = normalize_fields(fields)
     data['action'] = [action]
     initialize(state, today, cutoff)
     if action == 'import_data':
         if data.get('replace_confirm') != ['yes']:
             raise ValueError('Please confirm replacing your current plan.')
         text = data.get('backup_json', [''])[0]
-        raw = json.loads(text)
-        payload = raw.get('data', raw) if isinstance(raw, dict) else {}
-        if not isinstance(payload, dict) or any(len(payload.get(k, [])) > limit for k, limit in [('tasks', 500), ('events', 500), ('work_log', 5000)]):
+        imported = import_state(text)
+        if any(len(imported[k]) > limit for k, limit in [('tasks', 500), ('events', 500), ('work_log', 5000)]):
             raise ValueError('Backup exceeds the NAS edition limits (500 tasks / 500 events / 5000 logs).')
-        state = import_state(text)
+        state = imported
         initialize(state, today, cutoff)
         return state
     if action == 'save_settings':
         language = data.get('language', [''])[0]
-        workdays = sorted({int(day) for day in data.get('workdays', [])})
+        try:
+            workdays = sorted({int(day) for day in data.get('workdays', [])})
+        except ValueError:
+            raise ValueError('工作日設定不正確。') from None
         if language not in ('zh-Hant', 'zh-Hans', 'en') or any(d not in range(7) for d in workdays):
-            raise ValueError('Invalid language or workdays.')
+            raise ValueError('語言或工作日設定不正確。')
         changed = workdays != state['workdays']
         state.update(language=language, workdays=workdays)
         if changed:

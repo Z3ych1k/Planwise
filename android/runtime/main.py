@@ -4,6 +4,7 @@ from html import escape as h
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from pathlib import Path
+from validation import normalize_fields
 import secrets
 import shutil
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -278,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=8000000:
                 raise ValueError('表單大小不正確。')
-            data=parse_qs(self.rfile.read(length).decode())
+            data=normalize_fields(parse_qs(self.rfile.read(length).decode()))
             if not secrets.compare_digest(data.get('token',[''])[0],TOKEN):
                 self.reply(403,translate('頁面已過期，請重新整理。',self.server.state.get('language','zh-Hant')))
                 return

@@ -12,23 +12,23 @@ function snapshot(version=1){
     view:{today:'2026-11-12',cutoff:540,days:Array.from({length:7},(_,i)=>({date:`2026-11-${12+i}`,weekday:i%7,holiday:''})),ranks:{task:0},progress:{},available:[],occurrences:[],missing:[],preview:{same:[],removed:[],added:[]}}};
 }
 function boot(cache=snapshot(),query=''){
-  const nodes=new Map(),timers=new Map(),calls=[],writes=[];let next=0,reply=null,replyStatus=200;
+  const nodes=new Map(),timers=new Map(),calls=[],writes=[];let next=0,reply=null,replyStatus=200,hasReply=false;
   const node=()=>({innerHTML:'',hidden:true,textContent:'',disabled:false,classList:{toggle(){},add(){},remove(){}},append(){},prepend(){},remove(){},scrollIntoView(){}});
   for(const key of ['#app','#bubble','#notice','#content','#offline-banner','#connection','#login-form','#login-language','#auth-switch'])nodes.set(key,node());
   const writeButton=node();
   const storage=new Map(cache===null?[]:[['planwise-nas-snapshot-v1',typeof cache==='string'?cache:JSON.stringify(cache)]]);
-  const context=vm.createContext({console,URLSearchParams,AbortController,structuredClone,Date,
+  const context=vm.createContext({console,URLSearchParams,AbortController,structuredClone,Date,crypto:require('node:crypto').webcrypto,
     location:{search:query,origin:'http://nas.test:9473'},navigator:{userAgent:'PlanwiseNAS/0.3.0'},
     localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>{storage.set(key,value);writes.push(key);},removeItem:key=>storage.delete(key)},
     document:{getElementById:()=>null,documentElement:{},body:{classList:{toggle(){}}},visibilityState:'visible',querySelector:key=>nodes.get(key)||null,querySelectorAll:selector=>selector.includes('[data-write]')?[writeButton]:[],createElement:node,addEventListener(){}},
     window:{addEventListener(){},isSecureContext:false,scrollTo(){}},history:{replaceState(){}},innerWidth:390,
     requestAnimationFrame:()=>{},setInterval:()=>1,
     setTimeout:(callback,delay)=>{const id=++next;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),
-    fetch:(url,options)=>{calls.push({url,options});return reply?Promise.resolve({ok:replyStatus<400,status:replyStatus,json:async()=>reply}):new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted'))));}
+    fetch:(url,options)=>{calls.push({url,options});return hasReply?Promise.resolve({ok:replyStatus<400,status:replyStatus,json:async()=>{if(reply instanceof Error)throw reply;return reply;}}):new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted'))));}
   });
-  vm.runInContext(source+'\nglobalThis.client={sync,change,command,render,isOffline:()=>offline,current:()=>snap};',context);
+  vm.runInContext(source+'\nglobalThis.client={api,sync,change,command,render,isOffline:()=>offline,current:()=>snap};',context);
   return {client:context.client,nodes,calls,writes,writeButton,
-    respond:(data,status=200)=>{reply=data;replyStatus=status;},advance:ms=>{for(const [id,timer] of timers)if(timer.delay<=ms){timers.delete(id);timer.callback();}},
+    respond:(data,status=200)=>{reply=data;replyStatus=status;hasReply=true;},advance:ms=>{for(const [id,timer] of timers)if(timer.delay<=ms){timers.delete(id);timer.callback();}},
     flush:()=>new Promise(resolve=>setImmediate(resolve)),timerDelays:()=>[...timers.values()].map(timer=>timer.delay)};
 }
 
@@ -129,4 +129,47 @@ test('invitation usage refreshes even when the administrator plan version is unc
   app.respond(latest);await app.client.sync();
   assert.match(app.nodes.get('#app').innerHTML,/#1 · Used/);
   assert.match(app.nodes.get('#app').innerHTML,/newmember/);
+});
+
+
+test('HTML server errors keep their HTTP status and show a readable error',async()=>{
+  const app=boot();app.advance(8000);await app.flush();
+  app.respond(new SyntaxError('Unexpected token <'),503);
+  await assert.rejects(app.client.api('/api/state'),error=>{
+    assert.equal(error.status,503);assert.equal(error.code,'invalid_response');
+    assert.match(error.message,/invalid response/);assert.doesNotMatch(error.message,/Unexpected token/);return true;
+  });
+});
+
+test('invalid success JSON cannot be mistaken for a confirmed save',async()=>{
+  const app=boot();app.advance(8000);await app.flush();
+  for(const value of [new SyntaxError('bad json'),'text',[],null]){
+    app.respond(value,200);
+    await assert.rejects(app.client.api('/api/actions',{}),error=>error.code==='invalid_response'&&!error.status);
+  }
+});
+
+test('a failed save preserves plan and input and releases buttons for retry',async()=>{
+  const app=boot();app.advance(8000);await app.flush();
+  app.respond(snapshot());await app.client.sync(true);
+  const before=JSON.stringify(app.client.current());
+  app.nodes.get('#bubble').innerHTML='typed input retained';
+  app.respond({error:'Invalid date',code:'invalid'},400);
+  assert.equal(await app.client.change('save',{due:'2026-02-30'}),false);
+  assert.equal(JSON.stringify(app.client.current()),before);
+  assert.equal(app.nodes.get('#bubble').innerHTML,'typed input retained');
+  assert.equal(app.writeButton.disabled,false);
+  app.respond(snapshot(2));
+  assert.equal(await app.client.change('save_policy',{}),true);
+  assert.equal(app.client.current().version,2);
+});
+
+test('an unreadable save response keeps old data and requires reconnection',async()=>{
+  const app=boot();app.advance(8000);await app.flush();
+  app.respond(snapshot());await app.client.sync(true);
+  app.respond(new SyntaxError('bad json'),200);
+  assert.equal(await app.client.change('save_policy',{}),false);
+  assert.equal(app.client.current().version,1);
+  assert.equal(app.client.isOffline(),true);
+  assert.equal(app.writeButton.disabled,true);
 });

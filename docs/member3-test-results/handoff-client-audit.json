@@ -1,0 +1,8 @@
+{
+  "scenario": "HTTP 200 JSON object with api_version 1 but invalid state",
+  "saveReportedSuccess": false,
+  "previousTitle": "Cached essay",
+  "currentState": null,
+  "offline": true,
+  "cachedPlanPreservedInMemory": false
+}

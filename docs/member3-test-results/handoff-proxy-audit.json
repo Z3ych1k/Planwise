@@ -1,0 +1,33 @@
+[
+  {
+    "scenario": "save {'title': []}",
+    "status": 400,
+    "unchanged": true,
+    "cdn_no_store": true
+  },
+  {
+    "scenario": "save_settings {'language': []}",
+    "status": 400,
+    "unchanged": true,
+    "cdn_no_store": true
+  },
+  {
+    "scenario": "save {'title': 'x', 'kind': 'deadline', 'due': '2026-02-30', 'hours': '1', 'important': 'yes'}",
+    "status": 400,
+    "unchanged": true,
+    "cdn_no_store": true
+  },
+  {
+    "scenario": "untrusted proxy peer",
+    "status": 403
+  },
+  {
+    "scenario": "non HTTPS forwarded protocol",
+    "status": 403
+  },
+  {
+    "scenario": "HTTPS login cookie",
+    "secure": true,
+    "http_only": true
+  }
+]
