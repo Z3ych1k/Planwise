@@ -73,21 +73,24 @@ def occurrences(state, first_day, last_day, category=None):
         list[dict]: Sorted list of expanded occurrence blocks, each containing
         ``event_id``, ``title``, ``category``, ``repeat``, ``date``,
         ``occurrence_date``, ``start``, ``end``, ``movable``, and ``overnight``.
+        ``whole_date``, ``whole_start``, and ``whole_end`` describe the unsplit block.
     """
     workdays = state.get('workdays', [0, 1, 2, 3, 4])
     blocks = []
-    # Start scanning one day prior so overnight events from first_day - 1 include their morning tail
     scan_start = first_day - timedelta(days=1)
-    total_days = (last_day - scan_start).days + 1
+    window_origins = {
+        scan_start + timedelta(days=i) for i in range((last_day - scan_start).days + 1)
+    }
     for event in state.get('events', []):
         if category and event['category'] != category:
             continue
         overrides = event.get('overrides', {})
-        for offset in range(total_days):
-            day = scan_start + timedelta(days=offset)
-            if not matches(event, day, workdays):
+        # A visible block may have been moved from a date outside this window.
+        origins = window_origins | {date.fromisoformat(key) for key in overrides}
+        for origin in sorted(origins):
+            if not matches(event, origin, workdays):
                 continue
-            occ_key = day.isoformat()
+            occ_key = origin.isoformat()
             override = overrides.get(occ_key, {})
             if override.get('cancelled'):
                 continue
@@ -95,52 +98,27 @@ def occurrences(state, first_day, last_day, category=None):
             start = override.get('start', event['start'])
             end = override.get('end', event['end'])
             overnight = end > 1440
-            movable = event['category'] == 'private'
-            if not overnight:
-                if first_day <= target_day <= last_day:
+            segments = [(target_day, start, min(end, 1440))]
+            if overnight:
+                segments.append((target_day + timedelta(days=1), 0, end - 1440))
+            for day, segment_start, segment_end in segments:
+                if first_day <= day <= last_day and segment_start < segment_end:
                     blocks.append(dict(
                         event_id=event['id'],
                         title=event['title'],
                         category=event['category'],
                         repeat=event['repeat'],
-                        date=target_day.isoformat(),
+                        date=day.isoformat(),
                         occurrence_date=occ_key,
-                        start=start,
-                        end=end,
-                        movable=movable,
-                        overnight=False,
+                        start=segment_start,
+                        end=segment_end,
+                        whole_date=target_day.isoformat(),
+                        whole_start=start,
+                        whole_end=end,
+                        movable=event['category'] == 'private',
+                        overnight=overnight,
                     ))
-            else:
-                # Split overnight interval at midnight (1440): [start, 1440] on D and [0, end - 1440] on D+1
-                if first_day <= target_day <= last_day:
-                    blocks.append(dict(
-                        event_id=event['id'],
-                        title=event['title'],
-                        category=event['category'],
-                        repeat=event['repeat'],
-                        date=target_day.isoformat(),
-                        occurrence_date=occ_key,
-                        start=start,
-                        end=1440,
-                        movable=movable,
-                        overnight=True,
-                    ))
-                next_day = target_day + timedelta(days=1)
-                tail_end = end - 1440
-                if tail_end > 0 and first_day <= next_day <= last_day:
-                    blocks.append(dict(
-                        event_id=event['id'],
-                        title=event['title'],
-                        category=event['category'],
-                        repeat=event['repeat'],
-                        date=next_day.isoformat(),
-                        occurrence_date=occ_key,
-                        start=0,
-                        end=tail_end,
-                        movable=movable,
-                        overnight=True,
-                    ))
-    return sorted(blocks, key=lambda b: (b['date'], b['start'], b['end'], b['title']))
+    return sorted(blocks, key=lambda b: (b['date'], b['start'], b['event_id']))
 
 
 def event_cells(state, today, category=None):

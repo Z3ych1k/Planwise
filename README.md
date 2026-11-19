@@ -2,12 +2,26 @@
 
 安排大學生的 DDL，保留課程、私人時間與長期目標。以半小時為單位，不使用 AI。
 
+## 課程提交版快速啟動
+
+建議使用 Python 3.11 或以上。在解壓後、含有 `main.py` 的資料夾開啟終端機，執行以下指令。macOS 如沒有 `python`，請用 `python3`；Windows 如使用 Python Launcher，可改用 `py -3`。
+
+```sh
+python -m pip install -r nas/requirements.txt
+python -m nas.manage --database data/planwise-demo.sqlite3 create-user reviewer --admin
+python main.py
+```
+
+首次建立 `reviewer` 時，終端機會要求輸入兩次自行設定的密碼（12 至 200 字元）。之後啟動只需執行 `python main.py`，帳號和資料會保留。開啟 <http://127.0.0.1:8765/> 並登入。可新增一個有期限的任務，再打開「時間表」檢查排程。按 Ctrl+C 停止。如果 8765 被佔用，可用 `python main.py --port 8766` 改用 8766。
+
+課程入口沿用 NAS 網頁及 API，預設只在本機提供服務，示範資料存於 `data/planwise-demo.sqlite3`。部署到 NAS 請依下方 Docker 指引。整合及測試說明見 [提交版審查紀錄](docs/submission-review.md)。
+
 | 使用方式 | 資料與連線 | 安裝 |
 | --- | --- | --- |
 | NAS 網頁＋NAS APK 0.3.0 Preview | NAS 上每帳號一張表，同帳號跨裝置同步；離線唯讀 | [詳細教程與管理員密碼設定](nas/INSTALL.md) |
 | 本地 Android 0.5.2 Preview | 手機內獨立 JSON，不需要 NAS 或網絡 | [本地 Android 說明](android/README.md) |
 
-原 Mac／Windows 本地網頁版、桌面啟動器及分享工具已移除。Android 需要的內置介面移至 `android/runtime/`，只作 APK 執行環境。NAS 網頁版繼續提供服務。
+本地 Android 的內置介面在 `android/runtime/`。課程入口、NAS 網頁和 NAS APK 共用 Flask 服務及網頁介面。
 
 ## NAS 入口
 
@@ -16,7 +30,7 @@
 - **[安裝教程](nas/INSTALL.md)**：fnOS 圖形介面、終端部署、管理員帳號與密碼、重設密碼、升級與備份。
 - **[版本下載](https://github.com/Z3ych1k/Planwise/releases/tag/nas-v0.3.0-preview)**：部署包、NAS APK、Compose 及教程；本地 Android 仍用 0.5.2。
 - **[已有 NAS 的保留資料更新步驟](nas/UPGRADE.md)**：先備份，再更新原 Compose 專案；網頁重新整理，NAS APK 覆蓋升級。
-- [NAS 說明與驗證](nas/README.md)。版本在 `feature/nas-server`，組員 fork 分支未改動。
+- [NAS 說明與驗證](nas/README.md)。
 
 已啟動容器但未設帳號：在**容器互動終端**執行：
 

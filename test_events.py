@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from android.runtime.main import event_bubble, render
+from android.runtime.main import event_bubble, render, render_calendar
 from events import cancel_occurrence, move_occurrence, occurrences, save_event
 from storage import empty_state, load_state, save_state
 from test_planner import D0, D1, TODAY, form, state, task
@@ -121,6 +121,25 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         # Querying D1 alone still surfaces the early-morning tail carried over from D0
         tail = occurrences(s, TODAY + timedelta(days=1), TODAY + timedelta(days=1))
         self.assertEqual([(b['start'], b['end']) for b in tail], [(0, 360)])
+
+    def test_private_time_renders_in_local_android_calendar(self):
+        s = free_state()
+        s['events'] = [event('Private time', category='private')]
+        html = render_calendar(s, TODAY, [])
+        self.assertIn('Private time', html)
+        self.assertIn('data-draggable="true"', html)
+
+    def test_moved_private_time_stays_reserved_after_original_date(self):
+        s = free_state()
+        s['events'] = [event(category='private')]
+        moved_day = (TODAY + timedelta(days=5)).isoformat()
+        move_occurrence(s, form(id='e', occurrence_date=D0,
+                                new_date=moved_day, new_start='11:00'), TODAY)
+        later = TODAY + timedelta(days=3)
+        rows = occurrences(s, later, later + timedelta(days=6))
+        self.assertEqual([(b['date'], b['start'], b['end']) for b in rows],
+                         [(moved_day, 660, 720)])
+        self.assertNotIn((moved_day, 660), available_cells(s, later))
 
     def test_form_accepts_overnight_rejects_quarter_hour_and_same_times(self):
         """Verify form validation accepts overnight intervals but rejects 15-min steps or zero duration."""
