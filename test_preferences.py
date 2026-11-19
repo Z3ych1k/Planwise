@@ -28,6 +28,7 @@ class PreferencesTests(unittest.TestCase):
     def test_hk_2026_substitute_holidays_and_2027_new_year(self):
         """Verify all 34 gazetted 2026–2027 HK holidays are recognized as non-workdays."""
         self.assertEqual(len(HOLIDAYS), 34)
+        # Spot-check substitute holidays in 2026 and Lunar New Year / Christmas in 2027
         for day in ['2026-04-06', '2026-04-07', '2026-05-25', '2026-10-19', '2027-02-09', '2027-12-27']:
             dt = date.fromisoformat(day)
             self.assertTrue(holiday_name(dt))
@@ -41,6 +42,7 @@ class PreferencesTests(unittest.TestCase):
         s['events'] = [event('work', day='2026-12-24', repeat='workdays'), event('rest', day='2026-12-24', repeat='holidays')]
         rows = occurrences(s, date(2026, 12, 24), date(2026, 12, 28))
         self.assertEqual([(r['event_id'], r['date']) for r in rows], [('work', '2026-12-24'), ('rest', '2026-12-25'), ('rest', '2026-12-26'), ('rest', '2026-12-27'), ('work', '2026-12-28')])
+        # Restrict workweek to Saturday only ([5]) and verify complement behavior
         s['workdays'] = [5]
         rows = occurrences(s, date(2026, 11, 6), date(2026, 11, 8))
         self.assertEqual(rows, [])  # Before the series start.
@@ -63,6 +65,7 @@ class PreferencesTests(unittest.TestCase):
         self.assertEqual(goal_progress(s, goal), (0, 120, 0))
         mutate(s, form(action='progress', id=goal['id'], actual='0.5'), TODAY)
         self.assertEqual(goal_progress(s, goal), (30, 120, .25))
+        # Exceeding target hours (210 / 120 min) caps visual ratio at 1 without marking completed
         mutate(s, form(action='progress', id=goal['id'], actual='3'), TODAY)
         self.assertEqual(goal_progress(s, goal), (210, 120, 1))
         self.assertFalse(goal['completed'])
@@ -90,6 +93,7 @@ class PreferencesTests(unittest.TestCase):
         s['events'] = [event(repeat='holidays')]
         s['pins'] = [dict(task_id=s['tasks'][0]['id'], date=TODAY.isoformat(), start=600, end=630)]
         s['calendar'] = deepcopy(s['pins'])
+        # Both wrapped backup payload and legacy raw v2 JSON must restore identically
         self.assertEqual(import_state(export_state(s)), s)
         self.assertEqual(import_state(json.dumps(s)), s)
 
@@ -97,6 +101,7 @@ class PreferencesTests(unittest.TestCase):
         """Verify malformed JSON, unsupported locales, boolean weekday traps, and bad backup versions raise ``ValueError``."""
         s = empty_state()
         before = deepcopy(s)
+        # Malformed JSON, unsupported locales, bool-as-int weekday traps, and invalid backup versions
         invalid = [
             'no json',
             '[]',
@@ -115,6 +120,7 @@ class PreferencesTests(unittest.TestCase):
         """Verify HTML localizer translates static UI labels while protecting ``data-user``, inputs, and textareas."""
         html = '<p>任務地圖</p><b data-user>重要事項：任務地圖 &amp; N1</b><input name="title" value="任務地圖"><textarea>任務地圖</textarea>'
         en = localize_html(html, 'en')
+        # Static <p> label translates, while data-user, input values, and textarea content remain untouched
         self.assertIn('<p>Task map</p>', en)
         self.assertIn('重要事項：任務地圖 &amp; N1', en)
         self.assertIn('value="任務地圖"', en)

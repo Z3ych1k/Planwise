@@ -57,6 +57,7 @@ def day_windows(state, day):
         return [[0, 1440]]
     if day in state.get('availability', {}):
         return state['availability'][day]
+    # Default fallback: anchor evening study window at 18:00 (or earlier if capacity > 6h)
     amount = state['capacity'].get(day, 0)
     begin = min(18 * 60, 1440 - amount)
     return [[begin, begin + amount]] if amount else []
@@ -138,6 +139,7 @@ def may_borrow(state, task, today):
         bool: ``True`` if ``borrow_private`` is enabled and ``task['due']`` falls
         within ``today`` through ``today + 3 days`` inclusive; ``False`` otherwise.
     """
+    # Private-time borrowing is restricted to tasks due within the next 3 days
     return state.get('borrow_private', False) and today.isoformat() <= task['due'] <= (today + timedelta(days=3)).isoformat()
 
 
@@ -216,6 +218,7 @@ def candidate(state, today, not_before=0):
     tasks = [t for t in state['tasks'] if t['kind'] == 'deadline' and not t['completed']]
     remaining = {t['id']: t['minutes'] // 30 for t in tasks}
     by_id = {t['id']: t for t in tasks}
+    # Phase 1: lock in user-pinned blocks first so manual drags are preserved
     for block in state.get('pins', []):
         task = by_id.get(block['task_id'])
         if not task:
@@ -226,6 +229,7 @@ def candidate(state, today, not_before=0):
                 result[cell] = task['id']
                 free.discard(cell)
                 remaining[task['id']] -= 1
+    # Phase 2: schedule remaining work by Earliest Deadline First (tie-breaking by importance)
     for task in sorted(tasks, key=lambda t: (t['due'], not t['important'], t['id'])):
         eligible = sorted(cell for cell in free if max(today.isoformat(), task['start'] or today.isoformat()) <= cell[0] <= task['due'])
         chosen = eligible[:remaining[task['id']]]
@@ -233,6 +237,7 @@ def candidate(state, today, not_before=0):
             result[cell] = task['id']
             free.remove(cell)
         left = (remaining[task['id']] - len(chosen)) * 30
+        # Phase 3: borrow private event slots only if standard free capacity fell short
         if left and may_borrow(state, task, today):
             extra = sorted(task_cells(state, task, today, not_before).difference(result))[:left // 30]
             for cell in extra:
@@ -302,6 +307,7 @@ def refresh(state, today, propose=False, not_before=0):
         before, _ = candidate(stable, today, not_before)
         state['calendar'] = before
         old, new = cells(before), cells(after)
+        # Only surface a move proposal if at least one already-placed task changes slots
         moved = {ident for cell, ident in new.items() if old.get(cell) != ident and ident in old.values()}
         state['proposal'] = dict(id=secrets.token_hex(8), date=today.isoformat(), after=after) if moved else None
     else:
@@ -496,6 +502,7 @@ def move_block(state, data, today, not_before=0):
         raise ValueError('這裡有固定事項、受保護私人時間，或超出任務期限／可規劃範圍。')
     if new_cells.intersection(set(old) - source_cells):
         raise ValueError('這段時間已有其他任務，請選擇空檔。')
+    # Update both the active calendar and persistent pins to lock in the manual move
     mapping = {cell: ident for cell, ident in old.items() if cell not in source_cells}
     mapping.update({cell: task['id'] for cell in new_cells})
     state['calendar'] = blocks_from_cells(mapping)

@@ -72,6 +72,8 @@ def migrate(raw):
     if not isinstance(raw.get('tasks'), list) or not isinstance(raw.get('capacity'), dict):
         raise ValueError('缺少任務或可用時間資料。')
     state = empty_state()
+
+    # 1. Validate tasks and upgrade v1 task records (rounding remaining effort UP to 30-min steps)
     for item in raw['tasks']:
         t = dict(item)
         if legacy:
@@ -102,6 +104,8 @@ def migrate(raw):
         if any(old['id'] == t['id'] for old in state['tasks']):
             raise ValueError('任務識別碼重複。')
         state['tasks'].append(t)
+
+    # 2. Validate daily capacity (rounding legacy v1 capacity DOWN to 30-min steps)
     for day, amount in raw['capacity'].items():
         day = date.fromisoformat(day).isoformat()
         if type(amount) is not int or not 0 <= amount <= 1440:
@@ -109,6 +113,8 @@ def migrate(raw):
         state['capacity'][day] = amount // 30 * 30 if legacy else amount
         if state['capacity'][day] % 30:
             raise ValueError('可用時間須以半小時為單位。')
+
+    # 3. Validate historical work logs and enforce 24-hour daily ceiling
     logs = raw.get('work_log', [])
     if not isinstance(logs, list):
         raise ValueError('投入紀錄不正確。')
@@ -123,6 +129,8 @@ def migrate(raw):
             if any(type(row.get(k)) is not int or row[k] % 30 for k in ('start', 'end')) or not 0 <= row['start'] < row['end'] <= 1440 or row['end'] - row['start'] != row['minutes']:
                 raise ValueError('投入時間不正確。')
         state['work_log'].append(row)
+
+    # 4. Validate custom daily availability windows (max 2 non-overlapping intervals per day)
     availability = raw.get('availability', {})
     if not isinstance(availability, dict):
         raise ValueError('可用時段格式不正確。')
@@ -153,6 +161,7 @@ def migrate(raw):
             occupied.update(positions)
         return blocks
 
+    # 5. Validate calendar blocks, pending move proposals, events, pins, and user preferences
     state['calendar'] = checked_blocks(raw.get('calendar', []))
     state['calendar_day'] = raw.get('calendar_day', '')
     if state['calendar_day']:
@@ -230,6 +239,7 @@ def save_state(path, state):
         raw = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(raw, dict):
             raise ValueError('原資料格式已改變，請先檢查檔案後再儲存。')
+        # Preserve a one-time backup before overwriting legacy v1 or pre-events-v4 data files
         if raw.get('version', 1) == 1:
             backup = path.with_suffix('.v1.bak')
             if not backup.exists():
@@ -238,6 +248,7 @@ def save_state(path, state):
             backup = path.with_suffix('.pre-events.bak')
             if not backup.exists():
                 shutil.copy2(path, backup)
+    # Write to a sibling .tmp file first and atomically rename to avoid partial writes
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(path)
@@ -258,6 +269,7 @@ def import_state(text):
     """
     try:
         raw = json.loads(text)
+        # Unwrap versioned planwise-backup envelope if present; raw v2 JSON is also accepted
         if isinstance(raw, dict) and raw.get('format') == 'planwise-backup':
             if raw.get('backup_version') != 1:
                 raise ValueError()

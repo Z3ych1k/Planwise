@@ -82,6 +82,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s = free_state()
         s['events'] = [event(start=540, end=660), event('p', start=660, end=720, category='private')]
         free = available_cells(s, TODAY)
+        # Slots before 09:00 (540) and from 12:00 (720) remain free; 09:00–12:00 are blocked
         self.assertIn((D0, 480), free)
         self.assertNotIn((D0, 540), free)
         self.assertNotIn((D0, 690), free)
@@ -97,6 +98,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
     def test_weekly_multiple_days(self):
         """Verify that weekly recurrence expands across multiple selected weekdays."""
         s = free_state()
+        # 2026-11-05 is Thursday (3); [3, 5] expands to Thu, Sat, next Thu
         s['events'] = [event(repeat='weekly', weekdays=[3, 5])]
         rows = occurrences(s, TODAY, TODAY + timedelta(days=8))
         self.assertEqual([date.fromisoformat(b['date']).weekday() for b in rows], [3, 5, 3])
@@ -106,14 +108,17 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s = free_state()
         s['events'] = [event(day='2026-12-31', repeat='monthly')]
         rows = occurrences(s, date(2026, 12, 31), date(2027, 3, 31))
+        # Feb 2027 has no 31st and is skipped cleanly
         self.assertEqual([b['date'] for b in rows], ['2026-12-31', '2027-01-31', '2027-03-31'])
 
     def test_overnight_is_split_and_previous_day_tail_visible(self):
         """Verify that an overnight event splits at 24:00 (1440) and its tail renders next day."""
         s = free_state()
+        # 22:00–06:00 (1320..1800) splits at midnight into D0 [1320, 1440] and D1 [0, 360]
         s['events'] = [event(start=1320, end=1800)]
         rows = occurrences(s, TODAY, TODAY + timedelta(days=1))
         self.assertEqual([(b['date'], b['start'], b['end']) for b in rows], [(D0, 1320, 1440), (D1, 0, 360)])
+        # Querying D1 alone still surfaces the early-morning tail carried over from D0
         tail = occurrences(s, TODAY + timedelta(days=1), TODAY + timedelta(days=1))
         self.assertEqual([(b['start'], b['end']) for b in tail], [(0, 360)])
 
@@ -133,9 +138,12 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s['availability'] = {D0: [[540, 600]]}
         s['capacity'] = {D0: 60}
         s['events'] = [event(category='private')]
+        # Disabled by default -> cannot borrow private time
         self.assertEqual(candidate(s, TODAY)[0], [])
+        # Enabled + due within 3 days -> borrowing succeeds
         s['borrow_private'] = True
         self.assertEqual(len(cells(candidate(s, TODAY)[0])), 2)
+        # Due at day +4 -> beyond 3-day urgency cutoff, borrowing stops
         s['tasks'][0]['due'] = (TODAY + timedelta(days=4)).isoformat()
         self.assertEqual(candidate(s, TODAY)[0], [])
 
@@ -147,6 +155,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s['events'] = [event(category='private'), event('fixed', start=540, end=570)]
         s['borrow_private'] = True
         plan, missing = candidate(s, TODAY)
+        # Only the second half-hour (570..600) can be borrowed; 540..570 remains locked by fixed event
         self.assertEqual(set(cells(plan)), {(D0, 570)})
         self.assertEqual(missing[0][1], 30)
 
@@ -157,6 +166,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s['capacity'] = {D0: 120}
         s['events'] = [event(category='private')]
         s['borrow_private'] = True
+        # Scheduler picks 10:00–11:00 (600, 630) rather than touching the 09:00–10:00 private event
         self.assertEqual(set(cells(candidate(s, TODAY)[0])), {(D0, 600), (D0, 630)})
 
     def test_moving_one_weekly_occurrence_keeps_other_weeks(self):
@@ -224,6 +234,7 @@ class RecurrenceAndPrivacyTests(unittest.TestCase):
         s = state([task('morning', delta=1, amount=60)])
         s['availability'] = {D0: [], D1: [[0, 600]]}
         s['capacity'] = {D0: 0, D1: 600}
+        # 22:00–06:00 fixed event on D0 occupies D1 00:00–06:00 (0..360), pushing task to 06:00–07:00
         s['events'] = [event('night_fixed', day=D0, start=1320, end=1800, category='fixed', repeat='none')]
         plan, _ = candidate(s, TODAY)
         self.assertEqual(set(cells(plan)), {(D1, 360), (D1, 390)})
@@ -250,6 +261,7 @@ class DragAndBubbleTests(unittest.TestCase):
         s['calendar'] = [dict(task_id='prior', date=D0, start=540, end=600), dict(task_id='work', date=D0, start=600, end=660)]
         before = deepcopy(s['calendar'][0])
         move_block(s, form(id='work', source_date=D0, source_start='10:00', source_end='11:00', new_date=D0, new_start='11:00'), TODAY)
+        # Earlier task stays at 09:00–10:00, 10:00–11:00 becomes open gap, dragged task sits at 11:00–12:00
         self.assertEqual(s['calendar'][0], before)
         self.assertFalse(any((D0, m) in cells(s['calendar']) for m in (600, 630)))
         self.assertEqual({cell for cell, ident in cells(s['calendar']).items() if ident == 'work'}, {(D0, 660), (D0, 690)})
@@ -274,19 +286,23 @@ class DragAndBubbleTests(unittest.TestCase):
         move_block(s, data, TODAY)
         s['tasks'].append(task('C', delta=0, amount=60))
         refresh(s, TODAY)
+        # Pinned B stays at 13:00 (780); newly added C fills the freed 11:00 (660) gap
         self.assertEqual(cells(s['calendar'])[(D0, 780)], 'B')
         self.assertEqual(cells(s['calendar'])[(D0, 660)], 'C')
 
     def test_drag_rejects_task_fixed_private_deadline_and_stale_conflicts(self):
         """Verify dragging rejects collisions with tasks, fixed/private events, due bounds, and stale blocks."""
+        # Reject collisions against existing task (09:00), fixed event (12:00), and private event (12:30)
         for bad in ['09:00', '12:00', '12:30']:
             s = self.example()
             s['events'] = [event(start=720, end=750), event('p', start=750, end=780, category='private')]
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 move_block(s, form(id='B', source_date=D0, source_start='11:00', source_end='12:00', new_date=D0, new_start=bad), TODAY)
         s = self.example()
+        # Reject dragging task A past its D0 due date onto D1
         with self.assertRaises(ValueError):
             move_block(s, form(id='A', source_date=D0, source_start='09:00', source_end='11:00', new_date=D1, new_start='09:00'), TODAY)
+        # Reject dragging with stale source timestamps (10:30–11:30 instead of 11:00–12:00)
         with self.assertRaises(ValueError):
             move_block(s, form(id='B', source_date=D0, source_start='10:30', source_end='11:30', new_date=D0, new_start='13:00'), TODAY)
 
@@ -305,6 +321,7 @@ class DragAndBubbleTests(unittest.TestCase):
         s['events'] = [event(category='private', start=780, end=840)]
         s['borrow_private'] = True
         move_block(s, form(id='B', source_date=D0, source_start='11:00', source_end='12:00', new_date=D0, new_start='13:00'), TODAY)
+        # Turning off borrow_private must invalidate and clear the pin inside the private block
         s['borrow_private'] = False
         refresh(s, TODAY)
         self.assertNotIn((D0, 780), cells(s['calendar']))
@@ -326,6 +343,60 @@ class DragAndBubbleTests(unittest.TestCase):
         self.assertIn('固定事項', panel)
         self.assertIn('允許緊急 DDL', panel)
         self.assertIn('app.js', schedule)
+
+
+class ValidationEventsIntegrationTests(unittest.TestCase):
+    """Cross-module integration tests linking ``validation`` and ``events``."""
+
+    def test_normalized_overnight_event_and_date_boundary_pipeline(self):
+        """Verify normalize_fields, parse_date, save_event, and overnight expansion together."""
+        from storage import empty_state
+        from validation import normalize_fields
+        from events import save_event, occurrences
+
+        state = empty_state()
+
+        # 1. Invalid calendar date is caught cleanly by parse_date inside save_event
+        bad_date_payload = normalize_fields({
+            'title': 'Late Lab',
+            'category': 'fixed',
+            'date': '2026-02-30',
+            'event_start': '23:00',
+            'event_end': '01:00',
+            'repeat': 'none',
+        })
+        with self.assertRaisesRegex(ValueError, '日期無效'):
+            save_event(state, bad_date_payload)
+
+        # 2. Inverted until boundary (until < date) is rejected after valid date parsing
+        inverted_until_payload = normalize_fields({
+            'title': 'Late Lab',
+            'category': 'fixed',
+            'date': '2026-11-15',
+            'until': '2026-11-14',
+            'event_start': '23:00',
+            'event_end': '01:00',
+            'repeat': 'daily',
+        })
+        with self.assertRaisesRegex(ValueError, '重複結束日期不能早於開始日期'):
+            save_event(state, inverted_until_payload)
+
+        # 3. Valid normalized overnight event saves and expands across midnight into two segments
+        valid_payload = normalize_fields({
+            'title': 'Late Lab',
+            'category': 'fixed',
+            'date': '2026-11-14',
+            'until': '2026-11-15',
+            'event_start': '23:00',
+            'event_end': '01:00',
+            'repeat': 'none',
+        })
+        save_event(state, valid_payload)
+        blocks = occurrences(state, date(2026, 11, 14), date(2026, 11, 15))
+        self.assertEqual([(b['date'], b['start'], b['end']) for b in blocks], [
+            ('2026-11-14', 1380, 1440),
+            ('2026-11-15', 0, 60),
+        ])
 
 
 if __name__ == '__main__':

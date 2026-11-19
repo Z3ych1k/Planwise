@@ -1,186 +1,371 @@
-"""Fixed appointments and protected personal time, expanded only for the visible dates.
+"""Fixed and private calendar events, recurrence expansion, and occurrence overrides.
 
-This module manages recurring and single-instance calendar events (fixed appointments
-and private time blocks), handles schedule overrides (rescheduling and cancellations),
-expands visible occurrences across overnight boundaries, and validates event schemas.
+This module manages fixed commitments and protected private time blocks, supporting
+one-time and recurring schedules (``none``, ``daily``, ``weekly``, ``workdays``,
+``holidays``, ``monthly``), multi-weekday selection, overnight intervals where
+``end > 1440``, single-occurrence moves or cancellations, and schema validation.
 """
 from datetime import date, timedelta
 import secrets
-from validation import parse_date
 from holidays import is_workday
-from time_slots import (EVENT_INVALID_TIME, EVENT_MISSING_TIME,
-                        TIMETABLE_INVALID_TIME, TIMETABLE_MISSING_TIME, parse_clock)
-
-
-def clock(value):
-    """Parse an event clock string into minutes from midnight.
-
-    Args:
-        value (str): A time string in ``HH:MM`` format (e.g., ``"09:30"`` or ``"24:00"``).
-
-    Returns:
-        int: The number of minutes elapsed since ``00:00``.
-
-    Raises:
-        ValueError: If the time string is missing or improperly formatted.
-    """
-    return parse_clock(value, EVENT_MISSING_TIME, EVENT_INVALID_TIME)
+from time_slots import (
+    EVENT_INVALID_TIME,
+    EVENT_MISSING_TIME,
+    TIMETABLE_INVALID_TIME,
+    TIMETABLE_MISSING_TIME,
+    parse_clock,
+)
+from validation import parse_date
 
 
 def matches(event, day, workdays=(0, 1, 2, 3, 4)):
-    """Determine whether a recurring or single event occurs on a specific date.
-
-    Evaluates the event's start date, optional ``until`` boundary, and recurrence
-    rule (``none``, ``daily``, ``weekly``, ``monthly``, ``workdays``, or ``holidays``).
+    """Check whether an event's recurrence rule triggers on a given date.
 
     Args:
-        event (dict): The event dictionary containing ``date``, ``until``, ``repeat``,
-            and ``weekdays`` fields.
-        day (datetime.date): The candidate date to check against the recurrence rule.
-        workdays (Sequence[int], optional): Weekday indices (0=Mon to 6=Sun) treated
-            as standard workdays. Defaults to ``(0, 1, 2, 3, 4)``.
+        event (dict): Event dictionary containing ``date``, ``until``, ``repeat``,
+            and optional ``weekdays``.
+        day (datetime.date): Target calendar date to test.
+        workdays (Sequence[int], optional): Weekday integers (0=Mon .. 6=Sun)
+            treated as working days when evaluating ``'workdays'`` and
+            ``'holidays'`` recurrence. Defaults to ``(0, 1, 2, 3, 4)``.
 
     Returns:
-        bool: ``True`` if the event falls on ``day`` according to its rule;
-        ``False`` otherwise.
+        bool: ``True`` if the event occurs on ``day`` within its ``[date, until]``
+        active range; ``False`` otherwise.
     """
     origin = date.fromisoformat(event['date'])
-    if day < origin or (event['until'] and day > date.fromisoformat(event['until'])):
+    if day < origin:
         return False
-    rule = event['repeat']
-    if rule in ('workdays', 'holidays'):
-        return is_workday(day, workdays) == (rule == 'workdays')
-    return (day == origin if rule == 'none' else True if rule == 'daily' else day.weekday() in event['weekdays'] if rule == 'weekly' else day.day == origin.day)
+    if event.get('until') and day > date.fromisoformat(event['until']):
+        return False
+    repeat = event.get('repeat', 'none')
+    if repeat == 'none':
+        return day == origin
+    if repeat == 'daily':
+        return True
+    if repeat == 'weekly':
+        days = event.get('weekdays') or [origin.weekday()]
+        return day.weekday() in days
+    if repeat == 'workdays':
+        return is_workday(day, workdays)
+    if repeat == 'holidays':
+        return not is_workday(day, workdays)
+    if repeat == 'monthly':
+        return day.day == origin.day
+    return False
 
 
-def occurrences(state, first, last):
-    """Expand all active events into concrete time blocks within a visible date range.
+def occurrences(state, first_day, last_day, category=None):
+    """Expand all matching event instances across an inclusive date window.
 
-    Applies single-instance overrides (reschedules or cancellations) and splits
-    overnight events extending past midnight (1440 minutes) into two adjacent daily
-    segments so they render cleanly on the calendar grid.
+    Handles single-occurrence date/time overrides, cancelled instances, and
+    overnight intervals (``end > 1440``) by splitting them into ``[start, 1440]``
+    on day ``D`` and ``[0, end - 1440]`` on day ``D + 1``.
 
     Args:
         state (dict): Application state containing ``events`` and optional ``workdays``.
-        first (datetime.date): The inclusive start date of the visible window.
-        last (datetime.date): The inclusive end date of the visible window.
+        first_day (datetime.date): Inclusive start date of the query window.
+        last_day (datetime.date): Inclusive end date of the query window.
+        category (str | None, optional): Filter by ``'fixed'`` or ``'private'``,
+            or ``None`` to include all categories. Defaults to ``None``.
 
     Returns:
-        list[dict]: A chronologically sorted list of expanded occurrence dictionaries,
-        each containing ``event_id``, ``occurrence_date``, ``date``, ``start``, ``end``,
-        ``title``, ``category``, ``whole_start``, ``whole_end``, ``whole_date``, and ``repeat``.
+        list[dict]: Sorted list of expanded occurrence blocks, each containing
+        ``event_id``, ``title``, ``category``, ``repeat``, ``date``,
+        ``occurrence_date``, ``start``, ``end``, ``movable``, and ``overnight``.
     """
-    result = []
+    workdays = state.get('workdays', [0, 1, 2, 3, 4])
+    blocks = []
+    # Start scanning one day prior so overnight events from first_day - 1 include their morning tail
+    scan_start = first_day - timedelta(days=1)
+    total_days = (last_day - scan_start).days + 1
     for event in state.get('events', []):
-        origins = {first + timedelta(days=i - 1) for i in range((last - first).days + 2)}
-        origins.update(date.fromisoformat(key) for key in event['overrides'])
-        for origin in sorted(origins):
-            if not matches(event, origin, state.get("workdays", [0, 1, 2, 3, 4])):
+        if category and event['category'] != category:
+            continue
+        overrides = event.get('overrides', {})
+        for offset in range(total_days):
+            day = scan_start + timedelta(days=offset)
+            if not matches(event, day, workdays):
                 continue
-            override = event['overrides'].get(origin.isoformat(), {})
+            occ_key = day.isoformat()
+            override = overrides.get(occ_key, {})
             if override.get('cancelled'):
                 continue
-            day = date.fromisoformat(override.get('date', origin.isoformat()))
-            start, end = override.get('start', event['start']), override.get('end', event['end'])
-            segments = [(day, start, min(end, 1440))]
-            if end > 1440:
-                segments.append((day + timedelta(days=1), 0, end - 1440))
-            for current, a, b in segments:
-                if first <= current <= last and a < b:
-                    result.append(dict(event_id=event['id'], occurrence_date=origin.isoformat(), date=current.isoformat(), start=a, end=b, title=event['title'], category=event['category'], whole_start=start, whole_end=end, whole_date=day.isoformat(), repeat=event['repeat']))
-    return sorted(result, key=lambda item: (item['date'], item['start'], item['event_id']))
+            target_day = date.fromisoformat(override.get('date', occ_key))
+            start = override.get('start', event['start'])
+            end = override.get('end', event['end'])
+            overnight = end > 1440
+            movable = event['category'] == 'private'
+            if not overnight:
+                if first_day <= target_day <= last_day:
+                    blocks.append(dict(
+                        event_id=event['id'],
+                        title=event['title'],
+                        category=event['category'],
+                        repeat=event['repeat'],
+                        date=target_day.isoformat(),
+                        occurrence_date=occ_key,
+                        start=start,
+                        end=end,
+                        movable=movable,
+                        overnight=False,
+                    ))
+            else:
+                # Split overnight interval at midnight (1440): [start, 1440] on D and [0, end - 1440] on D+1
+                if first_day <= target_day <= last_day:
+                    blocks.append(dict(
+                        event_id=event['id'],
+                        title=event['title'],
+                        category=event['category'],
+                        repeat=event['repeat'],
+                        date=target_day.isoformat(),
+                        occurrence_date=occ_key,
+                        start=start,
+                        end=1440,
+                        movable=movable,
+                        overnight=True,
+                    ))
+                next_day = target_day + timedelta(days=1)
+                tail_end = end - 1440
+                if tail_end > 0 and first_day <= next_day <= last_day:
+                    blocks.append(dict(
+                        event_id=event['id'],
+                        title=event['title'],
+                        category=event['category'],
+                        repeat=event['repeat'],
+                        date=next_day.isoformat(),
+                        occurrence_date=occ_key,
+                        start=0,
+                        end=tail_end,
+                        movable=movable,
+                        overnight=True,
+                    ))
+    return sorted(blocks, key=lambda b: (b['date'], b['start'], b['end'], b['title']))
 
 
-def event_cells(state, today, category):
-    """Compute occupied 30-minute grid cells for a given event category over 7 days.
+def event_cells(state, today, category=None):
+    """Collect all 30-minute ``(date, minute)`` grid cells occupied by events in a 7-day window.
 
     Args:
-        state (dict): Application state containing all scheduled events.
-        today (datetime.date): The starting date of the 7-day planning window.
-        category (str): Event category filter (``"fixed"`` or ``"private"``).
+        state (dict): Application state dictionary.
+        today (datetime.date): First date of the 7-day planning horizon.
+        category (str | None, optional): Optional category filter (``'fixed'`` or
+            ``'private'``). Defaults to ``None``.
 
     Returns:
-        set[tuple[str, int]]: A set of ``(iso_date_str, minute_offset)`` pairs
-        representing occupied 30-minute time slots.
+        set[tuple[str, int]]: Set of ``(iso_date, start_minute)`` grid cells covered
+        by matching event occurrences.
     """
-    return {(block['date'], m) for block in occurrences(state, today, today + timedelta(days=6)) if block['category'] == category for m in range(block['start'], block['end'], 30)}
+    end_day = today + timedelta(days=6)
+    return {
+        (block['date'], minute)
+        for block in occurrences(state, today, end_day, category=category)
+        for minute in range(block['start'], block['end'], 30)
+    }
+
+
+def _parse_weekdays(raw_list, fallback_day):
+    """Parse and deduplicate weekday integers ``0..6`` for weekly recurrence.
+
+    Args:
+        raw_list (list[str]): Raw form values for ``weekdays``.
+        fallback_day (datetime.date): Origin date whose weekday is used if
+            ``raw_list`` is empty.
+
+    Returns:
+        list[int]: Sorted unique weekday integers in ``0..6``.
+
+    Raises:
+        ValueError: If any weekday value is not an integer in ``0..6``.
+    """
+    if not raw_list:
+        return [fallback_day.weekday()]
+    days = set()
+    for item in raw_list:
+        try:
+            val = int(item)
+        except (TypeError, ValueError):
+            raise ValueError('請選擇有效的星期。') from None
+        if not 0 <= val <= 6:
+            raise ValueError('請選擇有效的星期。')
+        days.add(val)
+    return sorted(days)
 
 
 def save_event(state, data):
-    """Create, update, or delete a fixed or private event series from form data.
+    """Create, update, or delete a fixed or private event series in application state.
 
-    Validates title length, category, recurrence rules, date boundaries, overnight
-    time ranges, and weekday selections before mutating ``state['events']``.
+    Dispatches to :func:`delete_event` when ``action == 'delete_event'``. For
+    creations and edits, normalizes overnight end times to ``end + 1440`` when
+    ``end < start``, validates ``weekdays``, and preserves cancelled dates while
+    clearing single-day time moves on series updates.
 
     Args:
-        state (dict): Application state dictionary holding the ``events`` list.
-        data (dict[str, list[str]]): Parsed HTTP form payload mapping field names
-            to lists of string values.
+        state (dict): Mutable application state containing ``events``.
+        data (dict[str, list[str]]): Normalized form payload containing ``action``,
+            ``id``, ``title``, ``category``, ``date``, ``until``, ``event_start``,
+            ``event_end``, ``repeat``, and optional ``weekdays``.
 
     Returns:
         None
 
     Raises:
-        ValueError: If the target event ID is not found, required fields are missing
-            or invalid, ``until`` precedes ``date``, start/end times are identical,
-            or weekday indices are out of range.
+        ValueError: If required fields are missing or exceed limits, dates/times
+            are malformed, ``until`` precedes ``date``, or an existing ``id`` is
+            not found.
     """
     def field(key):
         return data.get(key, [''])[0].strip()
 
-    ident = field('id')
-    old = next((e for e in state['events'] if e['id'] == ident), None)
-    if ident and old is None:
-        raise ValueError('找不到這個事項。')
     if field('action') == 'delete_event':
-        if old is None:
-            raise ValueError('找不到這個事項。')
-        state['events'].remove(old)
+        delete_event(state, data)
         return
-    title, category, rule = field('title'), field('category'), field('repeat')
-    if not title or len(title) > 100 or category not in ('fixed', 'private') or rule not in ('none', 'daily', 'weekly', 'monthly', 'workdays', 'holidays'):
-        raise ValueError('請填寫事項名稱，並選擇正確的類型及重複規則。')
-    day=parse_date(field('date')).isoformat()
-    until=parse_date(field('until')).isoformat() if field('until') else ''
-    if until and until<day:
-        raise ValueError('重複結束日期不能早於開始日期。')
-    begin, end = clock(field('event_start')), clock(field('event_end'))
-    if begin >= 1440 or end == begin:
-        raise ValueError('開始與結束時間不能相同；全天請使用 00:00–24:00。')
-    if end<begin:end+=1440
-    try:weekdays=sorted({int(v) for v in data.get('weekdays',[])})
-    except ValueError:raise ValueError('每週重複日期不正確。') from None
-    if not weekdays:weekdays=[parse_date(day).weekday()]
-    if any(not 0<=v<=6 for v in weekdays):raise ValueError('每週重複日期不正確。')
-    cancelled={key:row for key,row in old['overrides'].items() if row.get('cancelled')} if old else {}
-    values=dict(title=title,category=category,date=day,start=begin,end=end,repeat=rule,until=until,weekdays=weekdays,overrides=cancelled)
-    if old is None:state['events'].append(dict(id=secrets.token_hex(8),**values))
-    else:old.update(values)
+
+    title = field('title')
+    if not title or len(title) > 100:
+        raise ValueError('請填寫事項名稱（最多 100 字）。')
+    category = field('category')
+    if category not in ('fixed', 'private'):
+        raise ValueError('請選擇事項類型（固定事項或私人時間）。')
+    repeat = field('repeat') or 'none'
+    if repeat not in ('none', 'daily', 'weekly', 'workdays', 'holidays', 'monthly'):
+        raise ValueError('請選擇有效的重複規則。')
+    start_day = parse_date(field('date'))
+    until_raw = field('until')
+    until = ''
+    if until_raw:
+        until_day = parse_date(until_raw)
+        if until_day < start_day:
+            raise ValueError('重複結束日期不能早於開始日期。')
+        until = until_day.isoformat()
+    start = parse_clock(field('event_start'), EVENT_MISSING_TIME, EVENT_INVALID_TIME)
+    raw_end = parse_clock(field('event_end'), EVENT_MISSING_TIME, EVENT_INVALID_TIME)
+    if start >= 1440 or start == raw_end:
+        raise ValueError(EVENT_INVALID_TIME)
+    # Encode overnight intervals (e.g. 22:00..06:00) by adding 1440 minutes to end
+    end = raw_end + 1440 if raw_end < start else raw_end
+    weekdays = _parse_weekdays(data.get('weekdays', []), start_day) if repeat == 'weekly' else []
+
+    ident = field('id')
+    existing = next((e for e in state['events'] if e['id'] == ident), None) if ident else None
+    if ident and existing is None:
+        raise ValueError('找不到這個事項。')
+
+    # Keep single-date cancellations when editing a series, but reset single-occurrence time moves
+    preserved_overrides = {}
+    if existing is not None:
+        preserved_overrides = {
+            k: dict(cancelled=True)
+            for k, v in existing.get('overrides', {}).items()
+            if v.get('cancelled')
+        }
+
+    record = dict(
+        id=existing['id'] if existing else secrets.token_hex(8),
+        title=title,
+        category=category,
+        date=start_day.isoformat(),
+        until=until,
+        start=start,
+        end=end,
+        repeat=repeat,
+        weekdays=weekdays,
+        overrides=preserved_overrides,
+    )
+    if existing is None:
+        state['events'].append(record)
+    else:
+        existing.update(record)
 
 
-def move_occurrence(state,data,today):
-    def field(key):return data.get(key,[''])[0]
-    event=next((e for e in state['events'] if e['id']==field('id')),None)
-    if event is None:raise ValueError('找不到這個事項。')
-    if event['category']=='fixed':raise ValueError('固定事項不能移動；如有需要，請編輯整個系列或只移除這一次。')
-    original=parse_date(field('occurrence_date'))
-    if not matches(event,original,state.get("workdays",[0,1,2,3,4])):raise ValueError('找不到這一次重複事項。')
-    previous=event['overrides'].get(original.isoformat(),{})
-    if previous.get('cancelled'):raise ValueError('這一次事項已移除。')
-    duration=previous.get('end',event['end'])-previous.get('start',event['start'])
-    new_day=parse_date(field('new_date'))
-    begin=parse_clock(field('new_start'), TIMETABLE_MISSING_TIME, TIMETABLE_INVALID_TIME)
-    if not today<=new_day<=today+timedelta(days=6) or begin>=1440:
+def delete_event(state, data):
+    """Remove an entire event series from application state by its identifier.
+
+    Args:
+        state (dict): Mutable application state containing ``events``.
+        data (dict[str, list[str]]): Form payload containing ``id``.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If no event matching ``id`` exists in ``state['events']``.
+    """
+    ident = data.get('id', [''])[0].strip()
+    existing = next((e for e in state['events'] if e['id'] == ident), None)
+    if existing is None:
+        raise ValueError('找不到這個事項。')
+    state['events'].remove(existing)
+
+
+def move_occurrence(state, data, today):
+    """Reschedule a single instance of a private recurring or single event.
+
+    Creates or updates a date-keyed override entry in ``event['overrides']`` while
+    preserving the original event duration. Fixed events cannot be moved individually.
+
+    Args:
+        state (dict): Application state containing ``events`` and optional ``workdays``.
+        data (dict[str, list[str]]): Form payload with ``id``, ``occurrence_date``,
+            ``new_date``, and ``new_start``.
+        today (datetime.date): The start date of the 7-day planning window; target
+            dates must fall within ``[today, today + 6 days]``.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the event does not exist, belongs to the ``fixed`` category,
+            does not occur on ``occurrence_date``, was already cancelled, or targets
+            an out-of-range date/time.
+    """
+    def field(key):
+        return data.get(key, [''])[0]
+
+    event = next((e for e in state['events'] if e['id'] == field('id')), None)
+    if event is None:
+        raise ValueError('找不到這個事項。')
+    # Fixed appointments are strictly locked against single-occurrence dragging
+    if event['category'] == 'fixed':
+        raise ValueError('固定事項不能移動；如有需要，請編輯整個系列或只移除這一次。')
+    original = parse_date(field('occurrence_date'))
+    if not matches(event, original, state.get("workdays", [0, 1, 2, 3, 4])):
+        raise ValueError('找不到這一次重複事項。')
+    previous = event['overrides'].get(original.isoformat(), {})
+    if previous.get('cancelled'):
+        raise ValueError('這一次事項已移除。')
+    duration = previous.get('end', event['end']) - previous.get('start', event['start'])
+    new_day = parse_date(field('new_date'))
+    begin = parse_clock(field('new_start'), TIMETABLE_MISSING_TIME, TIMETABLE_INVALID_TIME)
+    # Enforce 7-day scheduling horizon [today, today + 6] and valid start before 24:00
+    if not today <= new_day <= today + timedelta(days=6) or begin >= 1440:
         raise ValueError('請移到未來七天內的有效時段。')
     event['overrides'][original.isoformat()] = dict(date=new_day.isoformat(), start=begin, end=begin + duration)
 
 
-def cancel_occurrence(state,data):
-    """Cancel by original occurrence date, including both halves of an overnight event."""
-    event=next((e for e in state['events'] if e['id']==data.get('id',[''])[0]),None)
-    if event is None:raise ValueError('找不到這個事項。')
-    original=parse_date(data.get('occurrence_date',[''])[0])
-    if not matches(event,original,state.get('workdays',[0,1,2,3,4])):
+def cancel_occurrence(state, data):
+    """Cancel a single occurrence of an event by its original scheduled date.
+
+    Marks the occurrence as ``{'cancelled': True}`` in ``event['overrides']``,
+    suppressing both segments if the event spans across midnight.
+
+    Args:
+        state (dict): Application state containing ``events`` and optional ``workdays``.
+        data (dict[str, list[str]]): Form payload containing ``id`` and
+            ``occurrence_date``.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the event does not exist, does not match ``occurrence_date``,
+            or has already been cancelled.
+    """
+    event = next((e for e in state['events'] if e['id'] == data.get('id', [''])[0]), None)
+    if event is None:
+        raise ValueError('找不到這個事項。')
+    original = parse_date(data.get('occurrence_date', [''])[0])
+    if not matches(event, original, state.get('workdays', [0, 1, 2, 3, 4])):
         raise ValueError('找不到這一次重複事項。')
     if event['overrides'].get(original.isoformat(), {}).get('cancelled'):
         raise ValueError('這一次事項已移除。')
@@ -188,50 +373,91 @@ def cancel_occurrence(state,data):
 
 
 def validate_events(items):
-    """Validate the structural integrity and field constraints of loaded event records.
+    """Validate and normalize a list of raw event dictionaries from persisted state.
 
-    Verifies unique string IDs, title lengths, ISO date formats, category and
-    recurrence enums, weekday lists, 30-minute aligned start/end intervals, and
-    override dictionaries.
+    Enforces schema constraints across event identifiers, titles, categories,
+    recurrence rules, weekday lists, half-hour time boundaries (up to ``2880``
+    minutes for overnight spans), and date-keyed overrides.
 
     Args:
-        items (list[dict]): Raw list of event dictionaries loaded from storage.
+        items (list[dict]): Raw event records loaded from JSON storage or backup.
 
     Returns:
-        list[dict]: The validated list of event dictionaries unchanged.
+        list[dict]: Validated and normalized event dictionaries.
 
     Raises:
-        ValueError: If ``items`` is not a list or any event record or override
-            violates schema, type, alignment, or boundary constraints.
+        ValueError: If ``items`` is not a list, any event has invalid fields,
+            duplicate IDs, malformed dates/times, or invalid override entries.
     """
     if not isinstance(items, list):
-        raise ValueError('固定事項資料不正確。')
+        raise ValueError('事項格式不正確。')
+    result = []
     seen = set()
-    for e in items:
-        if not all(isinstance(e[k], str) for k in ('id', 'title', 'date', 'category', 'repeat', 'until')) or not e['id'] or e['id'] in seen or not e['title'] or len(e['title']) > 100:
-            raise ValueError('固定事項名稱或識別碼不正確。')
-        seen.add(e['id'])
-        origin = date.fromisoformat(e['date'])
-        if e['until'] and date.fromisoformat(e['until']) < origin:
-            raise ValueError('事項結束日期不正確。')
-        if e['category'] not in ('fixed', 'private') or e['repeat'] not in ('none', 'daily', 'weekly', 'monthly', 'workdays', 'holidays'):
-            raise ValueError('事項類型或重複規則不正確。')
-        if not isinstance(e['weekdays'], list) or not e['weekdays'] or any(type(v) is not int or not 0 <= v <= 6 for v in e['weekdays']):
-            raise ValueError('每週重複日期不正確。')
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise ValueError('事項格式不正確。')
+        event = dict(raw)
+        ident = event.get('id')
+        title = event.get('title')
+        if not isinstance(ident, str) or not ident or ident in seen:
+            raise ValueError('事項識別碼不正確。')
+        if not isinstance(title, str) or not title.strip() or len(title) > 100:
+            raise ValueError('事項名稱不正確。')
+        if event.get('category') not in ('fixed', 'private'):
+            raise ValueError('事項類型不正確。')
+        repeat = event.get('repeat')
+        if repeat not in ('none', 'daily', 'weekly', 'workdays', 'holidays', 'monthly'):
+            raise ValueError('重複規則不正確。')
+        start = event.get('start')
+        end = event.get('end')
+        # Overnight intervals can reach end == 2880 (next-day 24:00) while max duration stays <= 1440 min
+        if (type(start) is not int or type(end) is not int
+                or start % 30 or end % 30
+                or not 0 <= start < 1440 or not 30 <= end <= 2880
+                or end <= start or end - start > 1440):
+            raise ValueError('事項時間不正確。')
+        start_day = date.fromisoformat(event['date'])
+        until = event.get('until', '')
+        if until:
+            until_day = date.fromisoformat(until)
+            if until_day < start_day:
+                raise ValueError('重複結束日期不能早於開始日期。')
+            event['until'] = until_day.isoformat()
+        else:
+            event['until'] = ''
+        event['date'] = start_day.isoformat()
 
-        def check_time(row):
-            if any(type(row[k]) is not int or row[k] % 30 for k in ('start', 'end')) or not 0 <= row['start'] < 1440 or not row['start'] < row['end'] <= row['start'] + 1440:
-                raise ValueError('事項時段不正確。')
+        raw_weekdays = event.get('weekdays', [])
+        if not isinstance(raw_weekdays, list) or any(type(d) is not int or not 0 <= d <= 6 for d in raw_weekdays):
+            raise ValueError('重複星期不正確。')
+        if repeat == 'weekly':
+            event['weekdays'] = sorted(set(raw_weekdays)) if raw_weekdays else [start_day.weekday()]
+        else:
+            event['weekdays'] = sorted(set(raw_weekdays))
 
-        check_time(e)
-        if not isinstance(e['overrides'], dict):
-            raise ValueError('單次事項修改資料不正確。')
-        for key, row in e['overrides'].items():
+        # Validate per-date overrides: either a cancellation flag or a duration-preserving time move
+        overrides = event.get('overrides', {})
+        if not isinstance(overrides, dict):
+            raise ValueError('單次修改格式不正確。')
+        clean_overrides = {}
+        expected_duration = end - start
+        for key, item in overrides.items():
             date.fromisoformat(key)
-            if not isinstance(row, dict):
-                raise ValueError('單次事項修改格式不正確。')
-            if row.get('cancelled') is True:
-                continue
-            date.fromisoformat(row['date'])
-            check_time(row)
-    return items
+            if not isinstance(item, dict):
+                raise ValueError('單次修改格式不正確。')
+            if item.get('cancelled') is True:
+                clean_overrides[key] = dict(cancelled=True)
+            else:
+                new_day = date.fromisoformat(item['date']).isoformat()
+                o_start = item.get('start')
+                o_end = item.get('end')
+                if (type(o_start) is not int or type(o_end) is not int
+                        or o_start % 30 or o_end % 30
+                        or not 0 <= o_start < 1440
+                        or o_end - o_start != expected_duration):
+                    raise ValueError('單次修改時段不正確。')
+                clean_overrides[key] = dict(date=new_day, start=o_start, end=o_end)
+        event['overrides'] = clean_overrides
+        seen.add(ident)
+        result.append(event)
+    return result

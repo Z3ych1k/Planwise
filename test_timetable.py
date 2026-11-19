@@ -69,6 +69,7 @@ class ClockAndApprovalTests(unittest.TestCase):
         plan, missing = candidate(s, TODAY)
         self.assertEqual([(b['date'], b['start'], b['end']) for b in plan], [(D0, 540, 600), (D0, 900, 960), (D1, 600, 660)])
         self.assertEqual(missing, [])
+        # Mark 09:00–09:30 as already logged; candidate() must skip that slot
         s['work_log'] = [dict(task_id='other', title='other', date=D0, minutes=30, start=540, end=570, finished=False)]
         plan, _ = candidate(s, TODAY)
         self.assertNotIn((D0, 540), cells(plan))
@@ -78,6 +79,7 @@ class ClockAndApprovalTests(unittest.TestCase):
         s = example()
         early_finish(s)
         self.assertIsNotNone(s['proposal'])
+        # Active calendar stays at D1 until the user explicitly confirms the move
         self.assertEqual(s['calendar'], [dict(task_id='B', date=D1, start=1080, end=1140)])
         solid, old, new = preview_parts(s)
         self.assertEqual(solid, [])
@@ -109,6 +111,7 @@ class ClockAndApprovalTests(unittest.TestCase):
         """Verify ``decide()`` raises ``ValueError`` when proposal ID or current date is stale."""
         s = example()
         early_finish(s)
+        # Wrong revision ID or next-day confirmation must be rejected
         with self.assertRaises(ValueError):
             decide(s, 'confirm_move', 'stale', TODAY)
         with self.assertRaises(ValueError):
@@ -152,10 +155,12 @@ class ClockAndApprovalTests(unittest.TestCase):
                 clock(bad)
         self.assertEqual(clock('24:00'), 1440)
         s = state([])
+        # Overlapping windows (18:00–20:00 and 19:30–21:00) must fail without mutating state
         data = form(**{f'{D0}_start_0': '18:00', f'{D0}_end_0': '20:00', f'{D0}_start_1': '19:30', f'{D0}_end_1': '21:00'})
         with self.assertRaises(ValueError):
             update_windows(s, data, TODAY)
         self.assertEqual(s['availability'], {})
+        # Adjusting second window start to 20:00 makes them adjacent and valid (180 min total)
         data[f'{D0}_start_1'] = ['20:00']
         update_windows(s, data, TODAY)
         self.assertEqual(s['capacity'][D0], 180)
@@ -186,11 +191,13 @@ class ClockAndApprovalTests(unittest.TestCase):
         with patch('android.runtime.main.today_hk', return_value=TODAY):
             map_page = render(s)
             calendar = render(s, query={'tab': ['schedule']})
+        # Before confirmation: preview shows both solid origin and ghost destination blocks
         self.assertIn('map-point', map_page)
         self.assertNotIn('class="task"', map_page)
         self.assertIn('solid origin', calendar)
         self.assertIn('ghost destination', calendar)
         self.assertIn('確認前移', calendar)
+        # After confirmation: ghost markers disappear
         decide(s, 'confirm_move', s['proposal']['id'], TODAY)
         with patch('android.runtime.main.today_hk', return_value=TODAY):
             confirmed = render(s, query={'tab': ['schedule']})

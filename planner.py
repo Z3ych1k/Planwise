@@ -30,6 +30,7 @@ def minutes(value):
         number = float(value)
     except (TypeError, ValueError):
         raise ValueError('時間請填數字，並以半小時（0.5 小時）為單位。') from None
+    # Enforce finite bounds [0, 1000] hours and exact 0.5-hour (30-minute) increments
     if not math.isfinite(number) or not 0 <= number <= 1000 or number * 2 % 1:
         raise ValueError('時間請填 0–1000 小時，並以半小時（0.5 小時）為單位。')
     return int(number * 60)
@@ -49,6 +50,7 @@ def rank(task, today):
         int: Priority rank where ``0`` is urgent & important, ``1`` is non-urgent
         & important, ``2`` is urgent & unimportant, and ``3`` is neither.
     """
+    # Quadrant index: 0 = urgent+important, 1 = important, 2 = urgent, 3 = neither
     urgent = task['kind'] == 'deadline' and (date.fromisoformat(task['due']) - today).days <= 3
     return (0 if urgent else 1) if task['important'] else (2 if urgent else 3)
 
@@ -101,6 +103,7 @@ def schedule(state, today):
                     plan[day].append((task, take))
                     free[day] -= take
                     left -= take
+        # Classify unscheduled minutes into overdue, beyond 7-day horizon, or insufficient capacity
         if left:
             reason = 'overdue' if task['due'] < days[0] else ('outside_week' if task['due'] > days[-1] else 'deadline_capacity')
             missing.append((task, left, reason))
@@ -120,6 +123,7 @@ def suggestions(state, day, free):
         sorted by importance first and title alphabetically; empty list if
         ``free < 30``.
     """
+    # Require at least one 30-minute slot of free capacity before recommending goals
     if free < 30:
         return []
     return sorted((t for t in state['tasks'] if t['kind'] == 'goal' and not t['completed'] and (not t['start'] or t['start'] <= day)), key=lambda t: (not t['important'], t['title']))
@@ -152,6 +156,7 @@ def mutate(state, data, today):
         return data.get(key, [''])[0].strip()
 
     action = field('action')
+    # Branch 1: update daily capacity budgets across the 7-day planning window
     if action == 'capacity':
         updated = {}
         for i in range(7):
@@ -162,7 +167,9 @@ def mutate(state, data, today):
             updated[day] = value
         state['capacity'].update(updated)
         return
+
     task = next((t for t in state['tasks'] if t['id'] == field('id')), None)
+    # Branch 2: create a new deadline/goal task or update an existing active task
     if action == 'save':
         title, course, kind = field('title'), field('course'), field('kind')
         if not title or len(title) > 100 or len(course) > 60:
@@ -193,6 +200,7 @@ def mutate(state, data, today):
             state['tasks'].append(dict(id=secrets.token_hex(8), completed=False, completed_on='', **values))
         else:
             task.update(values)
+    # Branch 3: delete a task or record actual effort against an active task
     elif action in ('progress', 'delete'):
         if task is None:
             raise ValueError('找不到這份任務。')
@@ -205,6 +213,7 @@ def mutate(state, data, today):
         if actual <= 0 or actual + spent_on(state, today.isoformat()) > 1440:
             raise ValueError('本次投入至少半小時；當日累計不能超過 24 小時。')
         finished = field('finished') == 'yes'
+        # Goals only complete when explicitly marked finished; deadlines also complete when remaining minutes hit 0
         if task['kind'] == 'deadline':
             task['minutes'] = 0 if finished else max(0, task['minutes'] - actual)
             finished = finished or task['minutes'] == 0

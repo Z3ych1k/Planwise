@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 import re
 
+# Load translation dictionary and compile longest-first alternation regex for single-pass matching
 CATALOG = json.loads(Path(__file__).with_name('translations.json').read_text(encoding='utf-8'))
 PATTERN = re.compile('|'.join(re.escape(key) for key in sorted(CATALOG, key=len, reverse=True)))
 
@@ -69,13 +70,16 @@ class Localizer(HTMLParser):
             tag (str): Lowercase HTML tag name.
             attrs (list[tuple[str, str | None]]): Sequence of ``(attribute, value)`` pairs.
         """
+        # Inherit skip state from ancestor tags or activate it on code/textarea/data-user elements
         skip = any(v for _, v in self.stack) or tag in ('script', 'style', 'textarea') or any(k == 'data-user' for k, v in attrs)
+        # Void HTML elements have no closing tag, so only push container elements onto the stack
         if tag not in ('input', 'meta', 'link', 'br', 'hr', 'img'):
             self.stack.append((tag, skip))
         result = []
         for key, value in attrs:
             if tag == 'html' and key == 'lang':
                 value = self.language
+            # Translate user-facing accessibility/placeholder attributes outside protected subtrees
             if value is not None and key in ('aria-label', 'placeholder') and not skip:
                 value = translate(value, self.language)
             result.append(key if value is None else key + '="' + escape(value, quote=True) + '"')
@@ -99,6 +103,7 @@ class Localizer(HTMLParser):
         Args:
             tag (str): Lowercase HTML tag name being closed.
         """
+        # Unwind back to the matching opening tag (tolerates unclosed inner HTML tags)
         for i in range(len(self.stack) - 1, -1, -1):
             if self.stack[i][0] == tag:
                 del self.stack[i:]
@@ -116,6 +121,7 @@ class Localizer(HTMLParser):
         """
         if not any(v for _, v in self.stack):
             text = translate(text, self.language)
+            # Reformat Chinese date headings (e.g. "2026 年 11 月") into numeric slash notation for English
             if self.language == 'en':
                 text = re.sub(r'(\d+) 年 (\d+) 月', r'\1 / \2', text)
                 text = re.sub(r'(\d+) 月 (\d+) 日，', r'\1 / \2, ', text)

@@ -5,6 +5,7 @@ parser that converts ``HH:MM`` timestamps (aligned to 30-minute increments withi
 ``00:00``–``24:00``) into integer minutes elapsed since midnight.
 """
 
+# Standardized localization messages for event and timetable clock validation
 EVENT_MISSING_TIME = '請填寫半小時單位的時間，例如 09:00 或 09:30。'
 EVENT_INVALID_TIME = '時間須為 00:00–24:00，並以半小時為單位。'
 TIMETABLE_MISSING_TIME = '請填寫時間，例如 18:00 或 18:30。'
@@ -37,6 +38,7 @@ def parse_clock(value, missing_message, invalid_message):
         hour, minute = map(int, value.split(':'))
     except (ValueError, AttributeError):
         raise ValueError(missing_message) from None
+    # Allow 00:00..24:00 on 30-minute steps, rejecting 24:30
     if not 0 <= hour <= 24 or minute not in (0, 30) or (hour == 24 and minute):
         raise ValueError(invalid_message)
     return hour * 60 + minute

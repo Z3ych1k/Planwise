@@ -55,9 +55,11 @@ class FixedEventTests(unittest.TestCase):
     def test_cancel_one_daily_overnight_occurrence_and_persist(self):
         """Verify cancelling one overnight daily occurrence removes both day segments and persists."""
         s = example()
+        # Daily overnight event 22:00–06:00 (1320–1800) starting on D0
         s['events'] = [event(start=1320, end=1800, repeat='daily')]
         cancel_occurrence(s, form(id='e', occurrence_date=D0))
         rows = occurrences(s, TODAY, TODAY + timedelta(days=2))
+        # Both D0's late-night half and D1's early-morning tail from D0 must be suppressed
         self.assertFalse(any(r['occurrence_date'] == D0 for r in rows))
         self.assertEqual([(r['date'], r['start']) for r in rows], [(D1, 1320), ((TODAY + timedelta(days=2)).isoformat(), 0), ((TODAY + timedelta(days=2)).isoformat(), 1320)])
         with tempfile.TemporaryDirectory() as folder:
@@ -74,6 +76,7 @@ class FixedEventTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '固定事項不能移動'):
             move_occurrence(s, form(id='e', occurrence_date=D0, new_date=D1, new_start='11:00'), TODAY)
         self.assertEqual(s, before)
+        # Bubble popup and timetable grid must disable drag-and-drop for fixed events
         html = event_bubble(s, TODAY, 'e', 'schedule', {'occurrence_date': [D1]})
         self.assertIn('cancel_occurrence', html)
         self.assertIn('value="' + D1 + '"', html)
@@ -86,6 +89,7 @@ class FixedEventTests(unittest.TestCase):
         """Verify cancelling a non-matching occurrence date or an already-cancelled date raises ``ValueError``."""
         s = example()
         s['events'] = [event(repeat='weekly')]
+        # D1 is not the weekly weekday, so cancelling D1 must fail without mutating overrides
         with self.assertRaises(ValueError):
             cancel_occurrence(s, form(id='e', occurrence_date=D1))
         self.assertEqual(s['events'][0]['overrides'], {})
@@ -99,6 +103,7 @@ class FixedEventTests(unittest.TestCase):
         s['events'] = [event(repeat='daily', category='private')]
         move_occurrence(s, form(id='e', occurrence_date=D0, new_date=D0, new_start='14:00'), TODAY)
         cancel_occurrence(s, form(id='e', occurrence_date=D1))
+        # Editing series resets D0 back to 10:00 (600) while keeping D1 cancelled
         save_event(s, form(action='save_event', id='e', title='New title', category='private', date=D0, event_start='10:00', event_end='11:00', repeat='daily'))
         expanded = occurrences(s, TODAY, TODAY + timedelta(days=2))
         self.assertFalse(any(r['date'] == D1 for r in expanded))
@@ -110,6 +115,7 @@ class FixedEventTests(unittest.TestCase):
         s['events'] = [event(repeat='daily', category='private')]
         day_7 = (TODAY + timedelta(days=7)).isoformat()
         day_6 = (TODAY + timedelta(days=6)).isoformat()
+        # Day +7 (outside 7-day window) and 24:00 start time must both be rejected
         with self.assertRaises(ValueError):
             move_occurrence(s, form(id='e', occurrence_date=D0, new_date=day_7, new_start='10:00'), TODAY)
         with self.assertRaises(ValueError):
@@ -149,6 +155,7 @@ class NonblockingSuggestionTests(unittest.TestCase):
             restored, _ = load_state(path, TODAY)
         self.assertEqual(sum(r['minutes'] for r in s['work_log'] if r['task_id'] == 'goal'), 60)
         self.assertEqual(s, restored)
+        # Outdated proposal revision ID must no longer be confirmable
         with self.assertRaises(ValueError):
             decide(s, 'confirm_move', revision, TODAY)
 
@@ -182,6 +189,7 @@ class NonblockingSuggestionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             s, (code, reply) = request(s, Path(folder) / 'data.json', action='progress', id='B', actual='0.5', session_start='18:30')
         self.assertEqual(code, 200, reply)
+        # Task B shrinks from 60 min (1080–1140) to 30 min (1080–1110) in place
         self.assertEqual(s['calendar'], [dict(task_id='B', date=D1, start=1080, end=1110)])
         self.assertEqual(next(t for t in s['tasks'] if t['id'] == 'B')['minutes'], 30)
         self.assertNotEqual(s['proposal']['id'], revision)

@@ -17,6 +17,7 @@ from android.runtime.main import Handler, make_server, render
 from planner import goal_progress, minutes, mutate, rank, schedule, spent_on, suggestions
 from storage import empty_state, load_state, migrate, save_state, seed
 
+# Canonical reference date and ISO strings shared across the entire test suite
 TODAY = date(2026, 11, 5)
 D0 = TODAY.isoformat()
 D1 = (TODAY + timedelta(days=1)).isoformat()
@@ -86,6 +87,7 @@ class SchedulingTests(unittest.TestCase):
 
     def test_urgent_boundary_and_goal(self):
         """Verify the 3-day urgency threshold and Eisenhower quadrant ranking for deadlines and goals."""
+        # Quadrant 0: due within 3 days; Quadrant 1: >= 4 days or goal; Quadrant 2: unimportant deadline
         self.assertEqual(rank(task(delta=3), TODAY), 0)
         self.assertEqual(rank(task(delta=4), TODAY), 1)
         self.assertEqual(rank(task(delta=0, important=False), TODAY), 2)
@@ -95,6 +97,7 @@ class SchedulingTests(unittest.TestCase):
         """Verify an earlier deadline takes precedence over a later important task."""
         s = state([task('A', delta=5, amount=60), task('B', delta=0, amount=60, important=False)], {D0: 60, D1: 60})
         plan, _, missing = schedule(s, TODAY)
+        # Task B (due D0, unimportant) must precede Task A (due D5, important)
         self.assertEqual(plan[D0][0][0]['id'], 'B')
         self.assertEqual(plan[D1][0][0]['id'], 'A')
         self.assertEqual(missing, [])
@@ -129,6 +132,7 @@ class SchedulingTests(unittest.TestCase):
         plan, free, missing = schedule(s, TODAY)
         self.assertFalse(any(plan.values()))
         self.assertEqual(missing, [])
+        # Goal appears in suggestions starting on D1 only when spare capacity exists
         self.assertEqual(suggestions(s, D0, free[D0]), [])
         self.assertEqual(suggestions(s, D1, free[D1]), [goal])
         self.assertEqual(suggestions(s, D1, 0), [])
@@ -177,6 +181,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertFalse(s['tasks'][0]['completed'])
         mutate(s, form(action='progress', id='a', actual='0.5', finished='yes'), TODAY)
         self.assertTrue(s['tasks'][0]['completed'])
+        # Logging additional progress on an already completed goal must fail
         with self.assertRaises(ValueError):
             mutate(s, form(action='progress', id='a', actual='0.5'), TODAY)
 
@@ -219,6 +224,7 @@ class SchedulingTests(unittest.TestCase):
         """Verify conservation of capacity and total scheduled/missing task minutes across seed data."""
         s = seed(TODAY)
         plan, free, missing = schedule(s, TODAY)
+        # Conservation invariant: scheduled + free + logged effort == daily capacity
         for day, rows in plan.items():
             used = sum(n for _, n in rows)
             self.assertEqual(used + free[day] + spent_on(s, day), s['capacity'][day])
@@ -227,6 +233,7 @@ class SchedulingTests(unittest.TestCase):
                 self.assertGreaterEqual(n, 30)
                 self.assertLessEqual(day, t['due'])
                 self.assertEqual(t['kind'], 'deadline')
+        # Total demand invariant: scheduled + missing == total active deadline minutes
         demand = sum(t['minutes'] for t in s['tasks'] if t['kind'] == 'deadline')
         self.assertEqual(sum(n for rows in plan.values() for _, n in rows) + sum(n for _, n, _ in missing), demand)
         self.assertEqual(schedule(empty_state(), TODAY)[2], [])
@@ -241,6 +248,7 @@ class SchedulingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mutate(s, form(action='save', title='bad dates', kind='deadline', hours='1', important='yes', start=D1, due=D0), TODAY)
 
+        # Completed tasks cannot be re-edited via save
         mutate(s, form(action='save', title='Done Task', kind='deadline', hours='1', important='yes', due=D1), TODAY)
         tid = s['tasks'][0]['id']
         mutate(s, form(action='progress', id=tid, actual='1', finished='yes'), TODAY)
@@ -281,6 +289,7 @@ class StorageAndPageTests(unittest.TestCase):
             path = Path(directory) / 'data.json'
             path.write_bytes(original)
             s, message = load_state(path, TODAY)
+            # Task duration rounds UP (45 -> 60) while capacity rounds DOWN (75 -> 60)
             self.assertEqual(s['tasks'][0]['minutes'], 60)
             self.assertEqual(s['capacity'][D0], 60)
             self.assertTrue(message)
@@ -308,6 +317,7 @@ class StorageAndPageTests(unittest.TestCase):
                 server = make_server(path)
             self.assertTrue(server.read_only)
             self.assertIn('原檔已保留', server.notice)
+            # POST mutations must fail with HTTP 503 while leaving the corrupt file intact
             handler = object.__new__(Handler)
             handler.server, handler.path = server, '/'
             with patch.object(handler, 'reply') as reply:
@@ -348,6 +358,7 @@ class StorageAndPageTests(unittest.TestCase):
         s['tasks'][0]['title'] = '<script>alert(1)</script>'
         with patch('android.runtime.main.today_hk', return_value=TODAY):
             page = render(s, query={'add': ['1']})
+        # HTML-escaped title prevents script injection
         self.assertNotIn('<script>', page)
         self.assertIn('&lt;script&gt;', page)
         self.assertIn('step="0.5"', page)

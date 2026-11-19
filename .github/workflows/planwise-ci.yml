@@ -40,6 +40,8 @@ jobs:
       - name: Run full unittest suite (including boundary & edge cases)
         run: python -m unittest discover -v
 
-      - name: Check frontend JavaScript syntax
+- name: Check frontend JavaScript syntax
         run: |
-          if [ -f android/runtime/app.js ]; then node --check android/runtime/app.js; fi
+          for f in app.js static/app.js android/runtime/app.js; do
+            if [ -f "$f" ]; then node --check "$f"; fi
+          done

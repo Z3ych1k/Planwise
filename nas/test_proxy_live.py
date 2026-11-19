@@ -11,6 +11,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import ssl
 import subprocess
@@ -51,6 +52,9 @@ class BrowserSession:
 class LiveProxyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        """Prepare temporary self-signed TLS certificates and start live proxy servers."""
+        if shutil.which('openssl') is None:
+            raise unittest.SkipTest('openssl CLI is not available on this system')
         cls.folder=tempfile.TemporaryDirectory(prefix='planwise-https-integration-')
         cls.addClassCleanup(cls.folder.cleanup)
         directory=Path(cls.folder.name)
