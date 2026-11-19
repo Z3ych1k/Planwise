@@ -14,13 +14,16 @@ function snapshot(version=1){
 function boot(cache=snapshot(),query=''){
   const nodes=new Map(),timers=new Map(),calls=[],writes=[];let next=0,reply=null,replyStatus=200,hasReply=false;
   const node=()=>({innerHTML:'',hidden:true,textContent:'',disabled:false,classList:{toggle(){},add(){},remove(){}},append(){},prepend(){},remove(){},scrollIntoView(){}});
-  for(const key of ['#app','#bubble','#notice','#content','#offline-banner','#connection','#login-form','#login-language','#auth-switch'])nodes.set(key,node());
+  for(const key of ['#app','#bubble','#notice','#content','#offline-banner','#connection','#login-form','#register-form','#login-language','#auth-switch'])nodes.set(key,node());
   const writeButton=node();
   const storage=new Map(cache===null?[]:[['planwise-nas-snapshot-v1',typeof cache==='string'?cache:JSON.stringify(cache)]]);
-  const context=vm.createContext({console,URLSearchParams,AbortController,structuredClone,Date,crypto:require('node:crypto').webcrypto,
+  const context=vm.createContext({console,FormData:class {constructor(form){return form;}},URLSearchParams,AbortController,structuredClone,Date,crypto:require('node:crypto').webcrypto,
     location:{search:query,origin:'http://nas.test:9473'},navigator:{userAgent:'PlanwiseNAS/0.3.0'},
     localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>{storage.set(key,value);writes.push(key);},removeItem:key=>storage.delete(key)},
-    document:{getElementById:()=>null,documentElement:{},body:{classList:{toggle(){}}},visibilityState:'visible',querySelector:key=>nodes.get(key)||null,querySelectorAll:selector=>selector.includes('[data-write]')?[writeButton]:[],createElement:node,addEventListener(){}},
+    document:{getElementById:()=>null,documentElement:{},body:{classList:{toggle(){}}},visibilityState:'visible',querySelector:key=>{
+      if((key==='#login-form'||key==='#register-form')&&!nodes.get('#app').innerHTML.includes('id="'+key.slice(1)+'"'))return null;
+      return nodes.get(key)||null;
+    },querySelectorAll:selector=>selector.includes('[data-write]')?[writeButton]:[],createElement:node,addEventListener(){}},
     window:{addEventListener(){},isSecureContext:false,scrollTo(){}},history:{replaceState(){}},innerWidth:390,
     requestAnimationFrame:()=>{},setInterval:()=>1,
     setTimeout:(callback,delay)=>{const id=++next;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),
@@ -97,6 +100,24 @@ test('sign-in offers invite-only registration with password confirmation',()=>{
   assert.match(html,/name="invite_code"/);
   assert.match(html,/name="password_confirm"/);
   assert.doesNotMatch(html,/name="is_admin"/);
+});
+
+test('fresh local setup omits invitations and submits to the local setup endpoint',async()=>{
+  const app=boot(null);app.advance(8000);await app.flush();
+  app.respond({code:'setup_required',error:'Create your first local account.'},401);
+  await app.client.sync(true);
+  const html=app.nodes.get('#app').innerHTML;
+  assert.match(html,/建立本機帳號/);
+  assert.match(html,/name="password_confirm"/);
+  assert.doesNotMatch(html,/name="invite_code"/);
+  app.respond(snapshot());
+  const password='Temporary-test-password';
+  const form=app.nodes.get('#register-form');
+  await form.onsubmit({preventDefault(){},target:[['username','first-user'],
+    ['password',password],['password_confirm',password]]});
+  assert.deepEqual(app.calls.slice(-2).map(({url})=>url),['/api/setup','/api/state']);
+  assert.equal(JSON.parse(app.calls.at(-2).options.body).username,'first-user');
+  assert.match(app.nodes.get('#app').innerHTML,/Cached essay/);
 });
 
 test('regular settings keep personal preferences and hide administrator management',()=>{

@@ -98,6 +98,9 @@ class Database:
         db.execute('DELETE FROM requests WHERE user_id=? AND key NOT IN (SELECT key FROM requests WHERE user_id=? ORDER BY at DESC,rowid DESC LIMIT 200)',
                    (user_id, user_id))
 
+    def has_users(self, db):
+        return db.execute('SELECT 1 FROM users LIMIT 1').fetchone() is not None
+
     def create_user(self, username, password, admin=False, db=None, language='zh-Hant'):
         if not isinstance(username, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{3,40}', username):
             raise ValueError('Username: 3–40 letters, digits, dots, underscores or hyphens.')

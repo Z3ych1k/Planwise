@@ -67,6 +67,12 @@ Object.assign(TEXT,{
 Object.assign(EN,{register:'Create account',registerLink:'Create an account with an invitation',backToLogin:'Already have an account? Sign in',loginNote:'Sign in to use the same plan on all devices, or create an account with an invitation.',registerNote:'Use an invitation from your administrator to create your own account and private plan. This creates a regular account only.',inviteCode:'Invitation code',confirmPassword:'Repeat password',invites:'Invitation management',inviteNote:'Each code can be used once within 7 days. The full code is shown only when created; copy it for the new user. Other settings belong to each user’s own plan.',generateInvite:'Generate invitation',inviteGenerated:'Invitation created. Copy and keep the code.',inviteOnce:'Copy this invitation code. Signing out clears it from this page.',inviteEmpty:'No invitations yet.',invitePending:'Unused',used:'Used',expired:'Expired',revoked:'Revoked',revoke:'Revoke',expires:'Expires',inviteRevoked:'Invitation revoked.',registered:'Account created and signed in.',invalidInvite:'Invalid, used or expired invitation. Ask your administrator for a new code.',usernameRule:'Use 3–40 letters, digits, dots, underscores or hyphens for the username.',passwordRule:'Use 12–200 characters for the password.',passwordMismatch:'The two passwords do not match.',usernameTaken:'This username is already in use.',alreadySignedIn:'Sign out before creating another account.',tooManyAttempts:'Too many attempts. Try again in 15 minutes.',registrationUncertain:'Connection lost. Account creation is unconfirmed. Reconnect and try signing in first.'});
 Object.assign(TEXT,{invalidResponse:['伺服器回應格式不正確，請稍後重新整理並確認最新資料。','服务器响应格式不正确，请稍后刷新并确认最新数据。']});
 Object.assign(EN,{invalidResponse:'The server returned an invalid response. Refresh later and check the latest data.'});
+Object.assign(TEXT,{
+  localSetupTitle:['建立本機帳號','创建本机账号'],
+  localSetupNote:['第一次使用時請設定帳號和密碼。這個帳號只用於此份本機資料，無需邀請碼。','第一次使用时请设置账号和密码。这个账号只用于此份本机数据，无需邀请码。'],
+  localSetupComplete:['本機帳號已建立，請登入。','本机账号已创建，请登录。']
+});
+Object.assign(EN,{localSetupTitle:'Create your local account',localSetupNote:'Choose a username and password to get started. This account is for this local copy and needs no invitation.',localSetupComplete:'Local setup is complete. Sign in with your account.'});
 let language='zh-Hant';
 try{language=localStorage.getItem('planwise-language')||language;}catch{}
 const embedded=document.getElementById('offline-data');
@@ -129,7 +135,13 @@ async function sync(force=false){
     adopt(data);if(force)closeBubble();render();if(scrolling!==undefined&&$('.calendar-wrap'))$('.calendar-wrap').scrollTop=scrolling;
   }catch(error){
     if(epoch!==authEpoch)return;
-    if(error.status===401){const hadPlan=!!snap;snap=null;offline=false;clearCache();closeBubble();if(hadPlan)render();else updateConnection();}
+    if(error.status===401){
+      const hadPlan=!!snap, needsSetup=error.code==='setup_required';
+      const authChanged=needsSetup!==(authMode==='setup');
+      if(authChanged)authMode=needsSetup?'setup':'login';
+      snap=null;offline=false;clearCache();closeBubble();
+      if(hadPlan||authChanged)render();else updateConnection();
+    }
     else if(!error.status)markOffline();
     else if(force)notify(error.message);
   }finally{syncing=false;}
@@ -162,21 +174,21 @@ async function change(action,fields={},version=snap?.version){
 function formError(message){const el=$('#bubble .error');if(el){el.hidden=false;el.textContent=message;el.scrollIntoView({block:'nearest'});}else notify(message);}
 function languageOptions(value){return ['zh-Hant','zh-Hans','en'].map((code,i)=>`<option value="${code}" ${value===code?'selected':''}>${['繁體中文','简体中文','English'][i]}</option>`).join('');}
 function authPage(){
-  const registering=authMode==='register';
+  const setup=authMode==='setup', registering=authMode!=='login';
   const disabled=registering&&offline?'disabled':'';
-  return `<main class="login paper" id="content"><div class="eyebrow">PLANWISE / NAS EDITION</div><h1>${language==='en'?'Planwise':'留白'}</h1>${registering?`<h2 class="auth-title">${esc(t('register'))}</h2>`:''}<p class="subtitle">${esc(t(registering?'registerNote':'loginNote'))}</p><form id="${registering?'register-form':'login-form'}">${registering?`<label for="invite-code">${esc(t('inviteCode'))}</label><input id="invite-code" name="invite_code" autocomplete="off" autocapitalize="none" spellcheck="false" required minlength="16" maxlength="80" ${disabled}>`:''}<label for="username">${esc(t('username'))}</label><input id="username" name="username" autocomplete="username" required maxlength="40" ${registering?'minlength="3" pattern="[A-Za-z0-9_.\\-]{3,40}"':''} ${disabled}><label for="password">${esc(t('password'))}</label><input id="password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" required ${registering?'minlength="12"':''} maxlength="200" ${disabled}>${registering?`<label for="confirm-password">${esc(t('confirmPassword'))}</label><input id="confirm-password" name="password_confirm" type="password" autocomplete="new-password" required minlength="12" maxlength="200" ${disabled}>`:''}<button class="primary" type="submit" ${disabled}>${esc(t(registering?'register':'signin'))} →</button></form><button class="auth-switch" id="auth-switch" type="button">${esc(t(registering?'backToLogin':'registerLink'))}</button><label for="login-language">${esc(t('language'))}</label><select id="login-language">${languageOptions(language)}</select><footer>${esc(t('privateNote'))}</footer>${offline?`<div id="offline-banner" class="banner warn">${esc(t('offlineLogin'))}<button id="retry-connect">${esc(t('refresh'))}</button></div>`:''}${/PlanwiseNAS/.test(navigator.userAgent)?`<p class="foot"><a href="/client/change-server">${esc(t('changeServer'))}</a></p>`:''}</main>`;
+  return `<main class="login paper" id="content"><div class="eyebrow">PLANWISE / NAS EDITION</div><h1>${language==='en'?'Planwise':'留白'}</h1>${registering?`<h2 class="auth-title">${esc(t(setup?'localSetupTitle':'register'))}</h2>`:''}<p class="subtitle">${esc(t(setup?'localSetupNote':registering?'registerNote':'loginNote'))}</p><form id="${registering?'register-form':'login-form'}">${authMode==='register'?`<label for="invite-code">${esc(t('inviteCode'))}</label><input id="invite-code" name="invite_code" autocomplete="off" autocapitalize="none" spellcheck="false" required minlength="16" maxlength="80" ${disabled}>`:''}<label for="username">${esc(t('username'))}</label><input id="username" name="username" autocomplete="username" required maxlength="40" ${registering?'minlength="3" pattern="[A-Za-z0-9_.\\-]{3,40}"':''} ${disabled}><label for="password">${esc(t('password'))}</label><input id="password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" required ${registering?'minlength="12"':''} maxlength="200" ${disabled}>${registering?`<label for="confirm-password">${esc(t('confirmPassword'))}</label><input id="confirm-password" name="password_confirm" type="password" autocomplete="new-password" required minlength="12" maxlength="200" ${disabled}>`:''}<button class="primary" type="submit" ${disabled}>${esc(t(registering?'register':'signin'))} →</button></form>${setup?'':`<button class="auth-switch" id="auth-switch" type="button">${esc(t(registering?'backToLogin':'registerLink'))}</button>`}<label for="login-language">${esc(t('language'))}</label><select id="login-language">${languageOptions(language)}</select><footer>${esc(t('privateNote'))}</footer>${offline?`<div id="offline-banner" class="banner warn">${esc(t('offlineLogin'))}<button id="retry-connect">${esc(t('refresh'))}</button></div>`:''}${/PlanwiseNAS/.test(navigator.userAgent)?`<p class="foot"><a href="/client/change-server">${esc(t('changeServer'))}</a></p>`:''}</main>`;
 }
 function bindAuth(){
   const form=$('#login-form')||$('#register-form');
   form.onsubmit=submitAuth;
-  $('#auth-switch').onclick=()=>{if(authSubmitting)return;authMode=authMode==='login'?'register':'login';render();};
+  if($('#auth-switch'))$('#auth-switch').onclick=()=>{if(authSubmitting)return;authMode=authMode==='login'?'register':'login';render();};
   if($('#retry-connect'))$('#retry-connect').onclick=()=>sync(true);
   $('#login-language').onchange=event=>{language=event.target.value;render();};
 }
 async function submitAuth(event){
   event.preventDefault();
   if(authSubmitting)return;
-  const registering=authMode==='register';
+  const setup=authMode==='setup', registering=authMode!=='login';
   if(registering&&offline){notify(t('offlineLogin'));return;}
   const fields=fieldsFrom(event.target);
   if(registering&&fields.password!==fields.password_confirm){notify(t('passwordMismatch'));return;}
@@ -185,10 +197,13 @@ async function submitAuth(event){
   const button=event.submitter;if(button)button.disabled=true;
   clearCache();
   try{
-    await api(registering?'/api/register':'/api/login',fields);
+    await api(setup?'/api/setup':registering?'/api/register':'/api/login',fields);
     const current=await api('/api/state');
     adopt(current);render();if(registering)notify(t('registered'));
   }catch(error){
+    if(setup&&error.code==='setup_complete'){
+      authMode='login';render();notify(t('localSetupComplete'));return;
+    }
     const key={invalid_invitation:'invalidInvite',invalid_username:'usernameRule',password_length:'passwordRule',password_mismatch:'passwordMismatch',username_taken:'usernameTaken',already_signed_in:'alreadySignedIn',rate_limited:'tooManyAttempts'}[error.code];
     notify(!error.status?t(registering?'registrationUncertain':'offlineLogin'):key?t(key):error.message);
   }finally{authSubmitting=false;if(button)button.disabled=false;}

@@ -2,19 +2,37 @@
 
 安排大學生的 DDL，保留課程、私人時間與長期目標。以半小時為單位，不使用 AI。
 
-## 課程提交版快速啟動
+## 第一次使用｜Windows／macOS
 
-建議使用 Python 3.11 或以上。在解壓後、含有 `main.py` 的資料夾開啟終端機，執行以下指令。macOS 如沒有 `python`，請用 `python3`；Windows 如使用 Python Launcher，可改用 `py -3`。
+下載本分支的完整 ZIP（GitHub **Code → Download ZIP**），先全部解壓，再打開含 `main.py` 和 `nas/` 的資料夾。需要 Python 3.11 或以上。本機試用只需要 Python 和瀏覽器。
 
-```sh
-python -m pip install -r nas/requirements.txt
-python -m nas.manage --database data/planwise-demo.sqlite3 create-user reviewer --admin
-python main.py
+**Windows（PowerShell）**：在解壓後的資料夾內開啟 PowerShell，輸入：
+
+```powershell
+py -3 --version
+py -3 -m pip install -r nas/requirements.txt
+py -3 main.py
 ```
 
-首次建立 `reviewer` 時，終端機會要求輸入兩次自行設定的密碼（12 至 200 字元）。之後啟動只需執行 `python main.py`，帳號和資料會保留。開啟 <http://127.0.0.1:8765/> 並登入。可新增一個有期限的任務，再打開「時間表」檢查排程。按 Ctrl+C 停止。如果 8765 被佔用，可用 `python main.py --port 8766` 改用 8766。
+如果找不到 `py`，但 `python --version` 有顯示 Python 3.11 或更新版本，就把每行的 `py -3` 改成 `python`。如果兩個命令都找不到，先安裝 Python，再重新開啟 PowerShell。
 
-課程入口沿用 NAS 網頁及 API，預設只在本機提供服務，示範資料存於 `data/planwise-demo.sqlite3`。部署到 NAS 請依下方 Docker 指引。整合及測試說明見 [提交版審查紀錄](docs/submission-review.md)。
+**macOS（終端機）**：進入解壓後含 `main.py` 的資料夾，執行：
+
+```sh
+python3 --version
+python3 -m pip install -r nas/requirements.txt
+python3 main.py
+```
+
+1. 保持終端機開著，在 Edge、Chrome 或其他瀏覽器開啟 <http://127.0.0.1:8765/>。第一次會顯示「建立本機帳號」。帳號須為 3–40 個英文字母、數字、點、底線或連字號，密碼須為 12–200 字元。確認密碼後，程式會登入並打開你的行程。
+2. 按「新增任務」，填一個有期限的作業和預計工時，再切到「時間行程」查看安排。可在「事項與設定」加入固定課程或私人時間。
+3. 用 Ctrl+C 停止。之後在**同一份解壓資料夾**執行 `main.py`，以原有帳號登入。帳號與資料存於 `data/planwise-demo.sqlite3`，請勿刪除或把它放進要分享的 ZIP。
+
+如果瀏覽器打不開，確認終端機仍在執行，並使用正確的網址。若 8765 已被使用，可執行 `py -3 main.py --port 8766`（macOS 用 `python3`），再開啟 <http://127.0.0.1:8766/>。如果之前用終端機建過帳號，登入頁會直接讓你用該帳號登入。
+
+**使用組員部署好的 NAS 網址時**，先向管理員索取邀請碼，再從登入頁選「以邀請碼建立帳號」。本機帳號只保存在這份解壓資料夾。用同一個 NAS 網址及帳號登入，才會在不同裝置看到同一份行程。
+
+整合及測試說明見 [提交版審查紀錄](docs/submission-review.md)。
 
 | 使用方式 | 資料與連線 | 安裝 |
 | --- | --- | --- |

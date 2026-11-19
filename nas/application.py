@@ -216,12 +216,8 @@ def create_app(config=None):
             raise APIError('Invalid username or password.', 401, 'credentials')
         return signed_in(token)
 
-    @app.post('/api/register')
-    def register():
-        data = body()
-        code, username, password = data.get('invite_code'), data.get('username'), data.get('password')
-        if not isinstance(code,str) or not 16 <= len(code.strip()) <= 80:
-            raise APIError('Invalid, expired or already used invitation code.',400,'invalid_invitation')
+    def registration_details(data):
+        username, password = data.get('username'), data.get('password')
         if not isinstance(username,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{3,40}',username):
             raise APIError('Username: 3–40 letters, digits, dots, underscores or hyphens.',400,'invalid_username')
         try:
@@ -233,6 +229,30 @@ def create_app(config=None):
         language = data.get('language','zh-Hant')
         if language not in ('zh-Hant','zh-Hans','en'):
             raise APIError('Invalid language.')
+        return username, password, language
+
+    def local_setup_enabled():
+        return app.config.get('LOCAL_FIRST_ACCOUNT') is True and request.remote_addr == '127.0.0.1'
+
+    @app.post('/api/setup')
+    def setup():
+        if not local_setup_enabled():
+            raise APIError('Local account setup is unavailable.', 404, 'setup_unavailable')
+        with store.transaction() as db:
+            if store.has_users(db):
+                raise APIError('Local setup is complete. Sign in with your account.', 409, 'setup_complete')
+            username, password, language = registration_details(body())
+            user_id = store.create_user(username, password, True, db, language=language)
+            token, _ = store.session(db, user_id)
+        return signed_in(token, 201)
+
+    @app.post('/api/register')
+    def register():
+        data = body()
+        code = data.get('invite_code')
+        if not isinstance(code,str) or not 16 <= len(code.strip()) <= 80:
+            raise APIError('Invalid, expired or already used invitation code.',400,'invalid_invitation')
+        username, password, language = registration_details(data)
         now = int(time.time())
         attempt_key = 'register-ip:'+str(request.remote_addr)
         error = None
@@ -290,6 +310,8 @@ def create_app(config=None):
     @app.get('/api/state')
     def get_state():
         with store.transaction() as db:
+            if local_setup_enabled() and not store.has_users(db):
+                raise APIError('Create your first local account.', 401, 'setup_required')
             return jsonify(snapshot(db,authorize(db)))
 
     @app.post('/api/actions')

@@ -16,6 +16,8 @@ def main():
     app = create_app({
         "DATABASE": str(DEMO_DATABASE),
         "COOKIE_SECURE": False,
+        "LOCAL_FIRST_ACCOUNT": True,
+        "TRUSTED_HOSTS": ["127.0.0.1", "localhost"],
         "PUBLIC_ORIGIN": "",
         "TRUSTED_PROXY_IPS": "",
     })

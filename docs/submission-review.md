@@ -15,3 +15,7 @@ The event expansion in `6767253` omitted the unsplit event fields expected by th
 ## How to reproduce
 
 Run `python -m unittest discover -v` and `node --test nas/test_client.cjs` from the extracted folder. The existing NAS workflow also defines Docker build and container checks. The fork's Core CI result applies to the fork commit; this ZIP includes the additional submission changes described above. The prior contribution notes and logs in this repository record their original development snapshots.
+
+## First-run account update
+
+A fresh local database previously displayed the NAS invitation form before anyone could create an invitation. The coursework launcher now enables one-time first account creation through the browser. Registration still needs an invitation when using a NAS deployment. The first-run tests cover the launcher, the initial account, concurrent setup attempts, and behavior on both local and NAS configurations.
